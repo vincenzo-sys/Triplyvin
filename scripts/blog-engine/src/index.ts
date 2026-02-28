@@ -7,8 +7,10 @@ import type { QueueItem } from './queue.js'
 import { scrapeCompetitors } from './scraper.js'
 import type { ScrapedArticle } from './scraper.js'
 import { generateArticle } from './claude.js'
-import { htmlToLexical } from './html-to-lexical.js'
+import { htmlToLexical, injectUploadNodes } from './html-to-lexical.js'
+import type { UploadNodeData } from './html-to-lexical.js'
 import { getAirportPhoto } from './unsplash.js'
+import { generateInfographics } from './infographics/index.js'
 import {
   createPost,
   updatePost,
@@ -68,6 +70,11 @@ interface ArticleReport {
     changesCount: number
     qualityScore: number
     changes: string[]
+  }
+  infographics: {
+    count: number
+    types: string[]
+    seconds: number
   }
   image: {
     found: boolean
@@ -146,6 +153,15 @@ function printReport(report: ArticleReport) {
   }
   if (report.editing.changes.length > 5) {
     console.log(`    ... and ${report.editing.changes.length - 5} more`)
+  }
+
+  console.log(`\n  INFOGRAPHICS:`)
+  if (report.infographics.count > 0) {
+    console.log(`    Generated: ${report.infographics.count}`)
+    console.log(`    Types: ${report.infographics.types.join(', ')}`)
+    console.log(`    Render time: ${report.infographics.seconds}s`)
+  } else {
+    console.log(`    None generated`)
   }
 
   console.log(`\n  IMAGE:`)
@@ -234,6 +250,7 @@ program
           analysis: { commonTopics: [], contentGaps: [], recommendedH2s: [], faqQuestions: [], suggestedTags: [] },
           article: { htmlLength: 0, estimatedWordCount: 0, faqCount: 0, excerpt: '', metaTitle: '', metaDescription: '', suggestedCategory: '' },
           editing: { changesCount: 0, qualityScore: 0, changes: [] },
+          infographics: { count: 0, types: [], seconds: 0 },
           image: { found: false, filename: null, alt: null, mediaId: null },
           post: { postId: null, status: 'draft', categoryCreated: '', tagsCreated: [] },
           timing: { totalSeconds: 0, scrapeSeconds: 0, analyzeSeconds: 0, writeSeconds: 0, editSeconds: 0, uploadSeconds: 0 },
@@ -328,9 +345,52 @@ program
           report.seoScore = seoScore
           console.log(`  ✓ SEO Score: ${seoScore.total}/${seoScore.maxTotal} (${seoScore.grade})`)
 
+          // Generate infographics
+          console.log('  Generating infographics...')
+          const infographicStart = Date.now()
+          const infographicResults = await generateInfographics(result.html, item)
+          report.infographics.count = infographicResults.length
+          report.infographics.types = infographicResults.map((r) => r.filename.replace(/.*-(\w+)-\d+\.png$/, '$1'))
+          report.infographics.seconds = Math.round((Date.now() - infographicStart) / 1000)
+
+          // Upload infographic images and collect upload node data
+          const uploadNodeData: UploadNodeData[] = []
+          for (const infographic of infographicResults) {
+            try {
+              const media = await uploadMedia(infographic.buffer, infographic.filename, infographic.alt)
+              const mediaId = media.doc?.id || media.id
+              const mediaUrl = media.doc?.url || media.url || ''
+              // Determine dimensions from filename pattern
+              const isStatHighlight = infographic.filename.includes('-stat-')
+              uploadNodeData.push({
+                id: mediaId,
+                url: mediaUrl,
+                alt: infographic.alt,
+                width: 1200,
+                height: isStatHighlight ? 400 : 675,
+                insertAfterHeading: infographic.insertAfterHeading,
+              })
+              console.log(`  ✓ Infographic uploaded: ${infographic.filename}`)
+            } catch (err) {
+              console.log(`  ⚠ Failed to upload infographic ${infographic.filename}: ${err instanceof Error ? err.message : err}`)
+            }
+          }
+
+          if (infographicResults.length > 0) {
+            console.log(`  ✓ ${infographicResults.length} infographic(s) generated in ${report.infographics.seconds}s`)
+          } else {
+            console.log('  ⚠ No infographic data extracted from article')
+          }
+
           // Convert HTML to Lexical
           console.log('  Converting to Lexical format...')
-          const lexicalContent = htmlToLexical(result.html)
+          let lexicalContent = htmlToLexical(result.html)
+
+          // Inject infographic upload nodes into Lexical document
+          if (uploadNodeData.length > 0) {
+            lexicalContent = injectUploadNodes(lexicalContent, uploadNodeData)
+            console.log(`  ✓ ${uploadNodeData.length} infographic(s) injected into document`)
+          }
 
           // Upload featured image
           const uploadStart = Date.now()

@@ -38,17 +38,16 @@ export async function searchGoogle(keyword: string, numResults = 5): Promise<str
 }
 
 export async function scrapeArticle(url: string): Promise<ScrapedArticle | null> {
-  try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), SCRAPE_TIMEOUT_MS)
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), SCRAPE_TIMEOUT_MS)
 
+  try {
     const res = await fetch(url, {
       signal: controller.signal,
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; TriplyBot/1.0; +https://triplypro.com)',
       },
     })
-    clearTimeout(timeout)
 
     if (!res.ok) {
       console.log(`  ⚠ Failed to fetch ${url}: ${res.status}`)
@@ -85,6 +84,8 @@ export async function scrapeArticle(url: string): Promise<ScrapedArticle | null>
   } catch (err) {
     console.log(`  ⚠ Error scraping ${url}: ${err instanceof Error ? err.message : err}`)
     return null
+  } finally {
+    clearTimeout(timeout)
   }
 }
 

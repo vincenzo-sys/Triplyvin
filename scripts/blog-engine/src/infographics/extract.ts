@@ -62,7 +62,7 @@ export type InfographicSpec = PricingComparisonSpec | StatHighlightSpec | TipsLi
 function extractPricingData(html: string, airportCode: string): PricingComparisonSpec | null {
   // Match patterns like: "Lot Name ... $XX/day" or "$XX" near lot names
   // Look for pricing in tables, lists, or paragraphs
-  const pricePattern = /(?:<(?:li|td|p|strong|b)[^>]*>)?([^<]{3,60}?)\s*[-–—:]\s*\$(\d+(?:\.\d{2})?)\s*(?:\/|\s*per\s*)?\s*(?:day|night|daily)/gi
+  const pricePattern = /(?:<(?:li|td|p|strong|b)[^>]*>)?([^<]{3,60})\s+[-–—:]\s*\$(\d+(?:\.\d{2})?)\s*(?:\/|\s*per\s*)?\s*(?:day|night|daily)/gi
   const matches: { name: string; price: string }[] = []
 
   let match

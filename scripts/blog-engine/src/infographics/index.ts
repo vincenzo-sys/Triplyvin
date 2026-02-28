@@ -105,8 +105,12 @@ export async function generateInfographics(
 
   const results: InfographicResult[] = []
   for (let i = 0; i < specs.length; i++) {
-    const result = await renderSpec(specs[i], item.slug, i)
-    results.push(result)
+    try {
+      const result = await renderSpec(specs[i], item.slug, i)
+      results.push(result)
+    } catch (err) {
+      console.log(`  ⚠ Failed to render infographic ${specs[i].type} (index ${i}): ${err instanceof Error ? err.message : err}`)
+    }
   }
 
   return results
