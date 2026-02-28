@@ -66,7 +66,9 @@ function extractPricingData(html: string, airportCode: string): PricingCompariso
   const matches: { name: string; price: string }[] = []
 
   let match
+  let lastPriceMatchIndex = 0
   while ((match = pricePattern.exec(html)) !== null) {
+    lastPriceMatchIndex = match.index
     const name = match[1].replace(/<[^>]+>/g, '').trim()
     const price = `$${match[2]}/day`
     if (name.length > 2 && name.length < 60) {
@@ -77,6 +79,7 @@ function extractPricingData(html: string, airportCode: string): PricingCompariso
   // Also try: "$XX ... for ... lot/garage/parking"
   const altPattern = /\$(\d+(?:\.\d{2})?)\s*(?:\/day|per day|daily)?\s+(?:for|at)\s+([^<.]{3,50}?)(?:[.<])/gi
   while ((match = altPattern.exec(html)) !== null) {
+    if (match.index > lastPriceMatchIndex) lastPriceMatchIndex = match.index
     const price = `$${match[1]}/day`
     const name = match[2].replace(/<[^>]+>/g, '').trim()
     if (name.length > 2 && !matches.some(m => m.name === name)) {
@@ -87,7 +90,7 @@ function extractPricingData(html: string, airportCode: string): PricingCompariso
   if (matches.length < 2) return null
 
   // Find the heading closest to pricing content
-  const headingBeforePricing = findHeadingBefore(html, pricePattern.lastIndex || 0, ['price', 'cost', 'rate', 'parking', 'comparison', 'option'])
+  const headingBeforePricing = findHeadingBefore(html, lastPriceMatchIndex, ['price', 'cost', 'rate', 'parking', 'comparison', 'option'])
 
   const rows: PricingRow[] = matches.slice(0, 6).map(m => ({
     name: m.name,
@@ -318,7 +321,7 @@ function extractComparisonMatrix(html: string, airportCode: string): ComparisonM
     values,
   }))
 
-  const heading = findHeadingBefore(html, 0, ['compare', 'comparison', 'feature', 'vs', 'versus', 'option'])
+  const heading = findHeadingBefore(html, html.length, ['compare', 'comparison', 'feature', 'vs', 'versus', 'option'])
     || findHeadingBefore(html, html.length, [])
 
   return {

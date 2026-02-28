@@ -104,7 +104,22 @@ function formatAirportData(data: AirportData): string {
 - Shuttle info: ${data.shuttleInfo}
 - Distance: ${data.distanceFromCity}
 
-When citing specific numbers (rates, distances, shuttle frequency), use ONLY the data above. For claims you're unsure about, use hedging language ("typically", "around", "based on current rates").`
+When citing specific numbers (rates, distances, shuttle frequency), use ONLY the data above. For claims you're unsure about, use hedging language ("typically", "around", "based on current rates").
+${formatLiveSources(data)}`
+}
+
+function formatLiveSources(data: AirportData): string {
+  if (!data.liveSources) return ''
+
+  const lines: string[] = ['\n**Verified Reference URLs (use these for external links — do NOT invent URLs):**']
+  for (const [category, value] of Object.entries(data.liveSources)) {
+    if (category.startsWith('_')) continue
+    if (typeof value === 'string') continue
+    const urls = Object.entries(value as Record<string, string>)
+    if (urls.length === 0) continue
+    lines.push(`- ${category}: ${urls.map(([label, url]) => `${label} <${url}>`).join(', ')}`)
+  }
+  return lines.length > 1 ? lines.join('\n') : ''
 }
 
 export function buildWritePrompt(

@@ -92,6 +92,19 @@ function renderBlockNode(node: LexicalNode): string {
       return `<blockquote>${inner}</blockquote>`
     }
 
+    case 'table': {
+      // Tables store raw HTML from the original conversion
+      return (node as { html?: string }).html || ''
+    }
+
+    case 'upload': {
+      // Upload nodes represent infographic images
+      const uploadNode = node as { value?: { url?: string; alt?: string } }
+      const url = uploadNode.value?.url || ''
+      const alt = uploadNode.value?.alt || ''
+      return url ? `<img src="${escapeHtml(url)}" alt="${escapeHtml(alt)}">` : ''
+    }
+
     default: {
       // Unknown block type — render children
       return children.map(renderBlockNode).join('')

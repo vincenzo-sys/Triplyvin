@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { z } from 'zod'
 import { env, CLAUDE_MODEL, MAX_TOKENS } from './config.js'
 import { buildAnalyzePrompt } from './prompts/analyze.js'
 import { buildWritePrompt } from './prompts/write.js'
@@ -35,7 +36,33 @@ interface EditResult {
   qualityScore: number
 }
 
-function parseJsonResponse<T>(text: string): T {
+const AnalysisResultSchema = z.object({
+  commonTopics: z.array(z.string()),
+  gaps: z.array(z.string()),
+  recommendedH2s: z.array(z.string()),
+  faqQuestions: z.array(z.string()),
+  estimatedWordCount: z.number(),
+  suggestedTags: z.array(z.string()),
+})
+
+const WriteResultSchema = z.object({
+  html: z.string(),
+  excerpt: z.string(),
+  metaTitle: z.string(),
+  metaDescription: z.string(),
+  earlyCta: z.string().optional(),
+  closingCta: z.string().optional(),
+  faqItems: z.array(z.object({ question: z.string(), answer: z.string() })),
+  suggestedCategory: z.string(),
+})
+
+const EditResultSchema = z.object({
+  html: z.string(),
+  changes: z.array(z.string()),
+  qualityScore: z.number(),
+})
+
+function extractJsonString(text: string): string {
   let jsonStr = text.trim()
 
   // Remove markdown code fences if present (greedy to handle large JSON)
@@ -53,7 +80,13 @@ function parseJsonResponse<T>(text: string): T {
     }
   }
 
-  return JSON.parse(jsonStr) as T
+  return jsonStr
+}
+
+function parseJsonResponse<T>(text: string, schema: z.ZodType<T>): T {
+  const jsonStr = extractJsonString(text)
+  const raw = JSON.parse(jsonStr)
+  return schema.parse(raw)
 }
 
 async function callClaude(prompt: string): Promise<string> {
@@ -99,7 +132,7 @@ export async function analyzeCompetitors(
   console.log('  Step 1/3: Analyzing competitors...')
   const prompt = buildAnalyzePrompt(keyword, competitors)
   const response = await callClaude(prompt)
-  const result = parseJsonResponse<AnalysisResult>(response)
+  const result = parseJsonResponse(response, AnalysisResultSchema)
   console.log(`  ✓ Analysis complete — ${result.recommendedH2s.length} headings, ${result.faqQuestions.length} FAQs`)
   return result
 }
@@ -112,7 +145,7 @@ export async function writeArticle(
   console.log('  Step 2/3: Writing article...')
   const prompt = buildWritePrompt(item, analysis, airportData)
   const response = await callClaude(prompt)
-  const result = parseJsonResponse<WriteResult>(response)
+  const result = parseJsonResponse(response, WriteResultSchema)
 
   // Validate CTA specificity
   validateCta('earlyCta', result.earlyCta, item.airportCode)
@@ -126,12 +159,13 @@ export async function editArticle(
   html: string,
   keyword: string,
   articleType: string,
-  articleStyle?: string
+  articleStyle?: string,
+  airportCode?: string
 ): Promise<EditResult> {
   console.log('  Step 3/3: Editing & QA...')
-  const prompt = buildEditPrompt(html, keyword, articleType, articleStyle as 'standard' | 'narrative' | 'listicle' | 'data-heavy' | 'comparison' | undefined)
+  const prompt = buildEditPrompt(html, keyword, articleType, articleStyle as 'standard' | 'narrative' | 'listicle' | 'data-heavy' | 'comparison' | undefined, airportCode)
   const response = await callClaude(prompt)
-  const result = parseJsonResponse<EditResult>(response)
+  const result = parseJsonResponse(response, EditResultSchema)
   console.log(`  ✓ Edit complete — ${result.changes.length} changes, quality: ${result.qualityScore}/100`)
   return result
 }
@@ -163,7 +197,7 @@ export async function generateArticle(
 
   // Step 3: Edit and QA
   const editStart = Date.now()
-  const editResult = await editArticle(writeResult.html, item.keyword, item.articleType, item.articleStyle)
+  const editResult = await editArticle(writeResult.html, item.keyword, item.articleType, item.articleStyle, item.airportCode)
   onStep?.('edit', { elapsed: Date.now() - editStart, result: editResult as unknown as Record<string, unknown> })
 
   return {
