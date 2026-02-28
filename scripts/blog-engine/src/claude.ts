@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
-import { env, CLAUDE_MODEL, MAX_TOKENS } from './config.js'
+import { env, CLAUDE_MODEL, MAX_TOKENS, DOMAIN } from './config.js'
 import { buildAnalyzePrompt } from './prompts/analyze.js'
 import { buildWritePrompt } from './prompts/write.js'
 import { buildEditPrompt } from './prompts/edit.js'
@@ -89,19 +89,40 @@ function parseJsonResponse<T>(text: string, schema: z.ZodType<T>): T {
   return schema.parse(raw)
 }
 
-async function callClaude(prompt: string): Promise<string> {
-  const response = await client.messages.create({
-    model: CLAUDE_MODEL,
-    max_tokens: MAX_TOKENS,
-    messages: [{ role: 'user', content: prompt }],
-  })
+const RETRY_DELAYS = [2000, 4000, 8000]
 
-  const textBlock = response.content.find((b) => b.type === 'text')
-  if (!textBlock || textBlock.type !== 'text') {
-    throw new Error('No text response from Claude')
+async function callClaude(prompt: string, system?: string): Promise<string> {
+  let lastError: Error | null = null
+
+  for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
+    try {
+      const response = await client.messages.create({
+        model: CLAUDE_MODEL,
+        max_tokens: MAX_TOKENS,
+        ...(system ? { system } : {}),
+        messages: [{ role: 'user', content: prompt }],
+      })
+
+      const textBlock = response.content.find((b) => b.type === 'text')
+      if (!textBlock || textBlock.type !== 'text') {
+        throw new Error('No text response from Claude')
+      }
+
+      return textBlock.text
+    } catch (err: unknown) {
+      lastError = err instanceof Error ? err : new Error(String(err))
+      const status = (err as { status?: number }).status
+      const isRetryable = status === 429 || status === 500 || status === 503 || status === 529
+
+      if (!isRetryable || attempt >= RETRY_DELAYS.length) throw lastError
+
+      const delay = RETRY_DELAYS[attempt]
+      console.warn(`  ⚠ Claude API error (${status}), retrying in ${delay / 1000}s... (attempt ${attempt + 1}/${RETRY_DELAYS.length})`)
+      await new Promise(resolve => setTimeout(resolve, delay))
+    }
   }
 
-  return textBlock.text
+  throw lastError!
 }
 
 function validateCta(field: string, cta: string | undefined, airportCode: string): void {
@@ -131,7 +152,7 @@ export async function analyzeCompetitors(
 ): Promise<AnalysisResult> {
   console.log('  Step 1/3: Analyzing competitors...')
   const prompt = buildAnalyzePrompt(keyword, competitors)
-  const response = await callClaude(prompt)
+  const response = await callClaude(prompt, `You are an SEO content analyst for an airport parking comparison website (${DOMAIN}). Today's date is ${new Date().toISOString().split('T')[0]}. Respond with ONLY valid JSON.`)
   const result = parseJsonResponse(response, AnalysisResultSchema)
   console.log(`  ✓ Analysis complete — ${result.recommendedH2s.length} headings, ${result.faqQuestions.length} FAQs`)
   return result
@@ -144,7 +165,7 @@ export async function writeArticle(
 ): Promise<WriteResult> {
   console.log('  Step 2/3: Writing article...')
   const prompt = buildWritePrompt(item, analysis, airportData)
-  const response = await callClaude(prompt)
+  const response = await callClaude(prompt, `You are a professional travel and airport parking content writer for ${DOMAIN}. Today's date is ${new Date().toISOString().split('T')[0]}. Respond with ONLY valid JSON.`)
   const result = parseJsonResponse(response, WriteResultSchema)
 
   // Validate CTA specificity
@@ -164,7 +185,7 @@ export async function editArticle(
 ): Promise<EditResult> {
   console.log('  Step 3/3: Editing & QA...')
   const prompt = buildEditPrompt(html, keyword, articleType, articleStyle as 'standard' | 'narrative' | 'listicle' | 'data-heavy' | 'comparison' | undefined, airportCode)
-  const response = await callClaude(prompt)
+  const response = await callClaude(prompt, `You are a senior editor reviewing an airport parking blog article for ${DOMAIN}. Today's date is ${new Date().toISOString().split('T')[0]}. Respond with ONLY valid JSON.`)
   const result = parseJsonResponse(response, EditResultSchema)
   console.log(`  ✓ Edit complete — ${result.changes.length} changes, quality: ${result.qualityScore}/100`)
   return result

@@ -68,10 +68,10 @@ ${html}
 
 **AI Search Optimization (enforce all of these — fix any that are missing):**
 8. OPENING ANSWER — the very first paragraph must be a concise, direct answer to the main query. If it's a fluffy intro instead, rewrite it so someone reading only that paragraph gets the core answer. This is the #1 thing AI search engines extract.
-9. KEY TAKEAWAYS — there MUST be a bulleted <ul> list near the top (after the opening answer) with 4-6 key facts. Each bullet should have the lead phrase in <strong>. If missing, add one.
+9. KEY TAKEAWAYS — for standard, data-heavy, and comparison styles, there MUST be a bulleted <ul> list near the top (after the opening answer) with 4-6 key facts. Each bullet should have the lead phrase in <strong>. If missing, add one. Skip this check for narrative and listicle styles.
 10. LISTS WHERE NATURAL — most H2 sections should contain a <ul> or <ol> where it fits (options, steps, tips, comparisons). If a section is listing multiple items in paragraph form, convert to a list. But don't force lists into sections that read better as narrative.
 11. ANSWER-FIRST SECTIONS — each H2 section must open with a concise 1-2 sentence direct answer (30-50 words) before elaborating. If a section buries the answer, restructure it.
-12. QUESTION HEADINGS — where natural, H2s should be phrased as questions. Convert bland headings to question format where it improves clarity, but don't force it on every heading.
+12. QUESTION HEADINGS — for standard and data-heavy styles, convert bland H2s to question format where it improves clarity. Do NOT convert headings for listicle style (keep numbered format) or narrative style (keep statement headings). Respect the article's style.
 13. SOURCE ATTRIBUTION — facts should be attributed to real sources where possible. NEVER fabricate an attribution. If a claim has no clear source, soften the language to "travelers typically find" or "based on current rates" rather than inventing a source.
 14. BOLD KEY TERMS — important terms, names, and key phrases should use <strong>. If key terms are plain text, bold them. Don't over-bold — 2-4 bolded terms per section is ideal.
 15. PARAGRAPH & SENTENCE LENGTH — paragraphs should be 3-5 sentences (80-120 words). Split any paragraph longer than 5 sentences. ALSO check individual sentences: if any sentence exceeds 25 words, split it. Rewrite compound sentences (those with semicolons, multiple commas, or "which/that" chains) as two shorter sentences. Target an 8th-grade reading level.

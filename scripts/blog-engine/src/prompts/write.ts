@@ -155,7 +155,7 @@ ${airportData ? formatAirportData(airportData) + '\n\n' : ''}${(() => {
 2. Do NOT use: h1, div, span, img, inline styles, classes, or IDs
 3. Do NOT include the article title as an h1 — it's handled separately
 4. All internal links use format: ${BLOG_BASE_URL}/[slug]
-5. External links: USE the verified external links database provided above. Pick the most relevant links for this topic. Add rel="nofollow" where specified. Use the suggested anchor text (vary it naturally). Do NOT invent external URLs — only use URLs from the database or well-known .gov sites.
+5. External links: USE the verified external links database and liveSources URLs provided above. Pick the most relevant links for this topic. Add rel="nofollow" where specified. Use the suggested anchor text (vary it naturally). Do NOT invent external URLs — ONLY use URLs from the databases provided above.
 6. Use natural keyword placement — target keyword in first paragraph, 2-3 H2s, and conclusion
 7. Write in a friendly, helpful, authoritative voice — not corporate
 8. Include specific details: prices, distances, shuttle times, tips
@@ -173,10 +173,10 @@ ${airportData ? formatAirportData(airportData) + '\n\n' : ''}${(() => {
 
 **AI Search & Featured Snippet Optimization (CRITICAL — follow these closely):**
 16. OPENING ANSWER: The very first paragraph must be a concise, direct answer to the main query implied by the title. It should be extractable on its own — if someone only read this one paragraph, they'd get the core answer. AI search engines pull this as the primary citation.
-17. KEY TAKEAWAYS: Immediately after the opening answer, include a "Key Takeaways" section using a <ul> with 4-6 bullet points summarizing the most important facts. Bold the lead phrase of each bullet with <strong>. AI search engines cite these heavily.
+17. KEY TAKEAWAYS: For standard, data-heavy, and comparison styles, immediately after the opening answer include a "Key Takeaways" section using a <ul> with 4-6 bullet points summarizing the most important facts. Bold the lead phrase of each bullet with <strong>. Skip this for narrative style (weave facts into prose instead) and listicle style (the numbered format serves this purpose).
 18. USE LISTS NATURALLY: Include <ul> or <ol> lists in most sections where they fit — options, steps, tips, comparisons, pros/cons. Don't force a list into a section that reads better as narrative, but when you're presenting multiple items, always use a list rather than burying them in paragraph form.
 19. ANSWER-FIRST SECTIONS: Begin each H2 section with a concise 1-2 sentence direct answer before elaborating. AI systems extract the first clear statement after a heading.
-20. QUESTION HEADINGS: Frame H2s as questions where natural (e.g., "How Much Does JFK Parking Cost?" not "JFK Parking Costs"). This matches search queries and AI extraction patterns.
+20. QUESTION HEADINGS: For standard and data-heavy styles, frame H2s as questions where natural (e.g., "How Much Does JFK Parking Cost?" not "JFK Parking Costs"). For listicle style, keep numbered headings as statements. For narrative style, prefer statement headings. This rule is OVERRIDDEN by the style instructions above when they conflict.
 21. DEFINITION PATTERN: When genuinely introducing a new concept the reader may not know, use the "What is X? X is..." pattern as an H3. Don't overuse this — it's for terms that actually need defining (e.g., "off-site parking", "cell phone lot"), not for obvious concepts.
 22. COMPARISONS: Include at least one comparison section using a structured list (e.g., "<h3>On-Site vs Off-Site Parking</h3>" with a <ul> comparing key differences side by side).
 23. SOURCE ATTRIBUTION: When citing facts you're confident about, attribute them to real sources (e.g., "the Port Authority of NY & NJ", "JFK's official parking page", "TSA guidelines"). NEVER fabricate a source or attribution — if you're not sure who published a fact, use softer language like "travelers typically find" or "based on current rates" instead.

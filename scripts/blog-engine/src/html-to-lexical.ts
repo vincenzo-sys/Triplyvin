@@ -73,6 +73,19 @@ interface LexicalTableNode {
   version: 1
 }
 
+export interface LexicalUploadNode {
+  type: 'upload'
+  relationTo: 'media'
+  value: {
+    id: string
+    url: string
+    alt: string
+    width: number
+    height: number
+  }
+  version: 2
+}
+
 interface LexicalRootNode {
   type: 'root'
   children: LexicalNode[]
@@ -92,6 +105,7 @@ type LexicalNode =
   | LexicalLinkNode
   | LexicalQuoteNode
   | LexicalTableNode
+  | LexicalUploadNode
   | LexicalElementNode
 
 export interface LexicalDocument {
@@ -328,9 +342,12 @@ function convertBlockElement(el: HTMLElement): LexicalNode[] {
           if (inlineContent.length === 0) inlineContent.push(makeTextNode(''))
           items.push(makeListItemNode(inlineContent, itemIndex))
 
-          // Add nested lists as separate list items with increased indent
+          // Wrap nested lists in listitem nodes so Lexical structure stays valid
           for (const nestedList of nestedLists) {
-            items.push(nestedList)
+            items.push(makeListItemNode([makeTextNode('')], itemIndex))
+            // Attach nested list as a child of the preceding listitem
+            const wrapperItem = items[items.length - 1]
+            ;(wrapperItem as { children: LexicalNode[] }).children = [nestedList]
           }
 
           itemIndex++
@@ -452,4 +469,83 @@ export function extractTextFromLexical(nodes: LexicalNode[]): string {
     }
   }
   return text
+}
+
+export interface UploadNodeData {
+  id: string
+  url: string
+  alt: string
+  width: number
+  height: number
+  insertAfterHeading: string
+}
+
+/**
+ * Inject upload nodes (infographic images) into a Lexical document.
+ * Finds heading nodes matching `insertAfterHeading`, then inserts the
+ * upload node after the next paragraph/block sibling.
+ */
+export function injectUploadNodes(doc: LexicalDocument, uploads: UploadNodeData[]): LexicalDocument {
+  if (uploads.length === 0) return doc
+
+  const children = [...doc.root.children]
+
+  // Process uploads in reverse order so insertions don't shift indices
+  const insertions: { index: number; node: LexicalUploadNode }[] = []
+
+  for (const upload of uploads) {
+    if (!upload.insertAfterHeading) continue
+
+    const headingText = upload.insertAfterHeading.toLowerCase().trim()
+    let headingIndex = -1
+
+    // Find the heading node that matches
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i]
+      if (child.type === 'heading' && 'children' in child) {
+        const text = extractTextFromLexical(child.children as LexicalNode[]).toLowerCase().trim()
+        if (text === headingText || text.includes(headingText) || headingText.includes(text)) {
+          headingIndex = i
+          break
+        }
+      }
+    }
+
+    if (headingIndex === -1) continue
+
+    // Insert after the next paragraph/block sibling (not immediately after heading)
+    let insertIndex = headingIndex + 1
+    if (insertIndex < children.length && children[insertIndex].type !== 'heading') {
+      insertIndex++ // Skip one block after heading
+    }
+
+    const uploadNode: LexicalUploadNode = {
+      type: 'upload',
+      relationTo: 'media',
+      value: {
+        id: upload.id,
+        url: upload.url,
+        alt: upload.alt,
+        width: upload.width,
+        height: upload.height,
+      },
+      version: 2,
+    }
+
+    insertions.push({ index: insertIndex, node: uploadNode })
+  }
+
+  // Sort by index descending so we can insert without shifting issues
+  insertions.sort((a, b) => b.index - a.index)
+
+  for (const { index, node } of insertions) {
+    children.splice(index, 0, node as unknown as LexicalNode)
+  }
+
+  return {
+    root: {
+      ...doc.root,
+      children,
+    },
+  }
 }
