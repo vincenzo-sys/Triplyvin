@@ -1,6 +1,7 @@
 import { DOMAIN, BLOG_BASE_URL } from '../config.js'
 import type { QueueItem } from '../queue.js'
 import type { AirportData } from '../airport-data.js'
+import { getExternalLinks, formatExternalLinksForPrompt } from '../external-links.js'
 
 interface AnalysisResult {
   commonTopics: string[]
@@ -128,15 +129,18 @@ ${getArticleTypeInstructions(item)}
 ${getStyleInstructions(item.articleStyle || 'standard', item)}
 ${outlineSection}
 
-${airportData ? formatAirportData(airportData) + '\n\n' : ''}**Topics to cover (from competitor analysis):** ${analysis.commonTopics.join(', ')}
+${airportData ? formatAirportData(airportData) + '\n\n' : ''}${(() => {
+    const links = getExternalLinks(item.airportCode, item.articleType)
+    return links.length > 0 ? formatExternalLinksForPrompt(links, item.articleType) + '\n' : ''
+  })()}**Topics to cover (from competitor analysis):** ${analysis.commonTopics.join(', ')}
 **Content gaps to fill (unique angles):** ${analysis.gaps.join(', ')}
 
 **Writing rules:**
-1. Output ONLY clean HTML using these tags: h2, h3, p, ul, ol, li, a, strong, em, blockquote
-2. Do NOT use: h1, div, span, table, img, inline styles, classes, or IDs
+1. Output ONLY clean HTML using these tags: h2, h3, p, ul, ol, li, a, strong, em, blockquote, table, thead, tbody, tr, th, td
+2. Do NOT use: h1, div, span, img, inline styles, classes, or IDs
 3. Do NOT include the article title as an h1 — it's handled separately
 4. All internal links use format: ${BLOG_BASE_URL}/[slug]
-5. External links to authoritative sources are encouraged (airport websites, TSA, etc.)
+5. External links: USE the verified external links database provided above. Pick the most relevant links for this topic. Add rel="nofollow" where specified. Use the suggested anchor text (vary it naturally). Do NOT invent external URLs — only use URLs from the database or well-known .gov sites.
 6. Use natural keyword placement — target keyword in first paragraph, 2-3 H2s, and conclusion
 7. Write in a friendly, helpful, authoritative voice — not corporate
 8. Include specific details: prices, distances, shuttle times, tips
@@ -167,6 +171,9 @@ ${airportData ? formatAirportData(airportData) + '\n\n' : ''}**Topics to cover (
 27. FRESHNESS SIGNALS: For things that genuinely change (rates, policies, construction updates), include timeframe references like "as of 2026" or "current rates". Don't add year references to evergreen facts that don't change — it just dates the content unnecessarily.
 28. PARAGRAPH LENGTH: Keep paragraphs to 3-5 sentences (80-120 words). Long enough to develop a point, short enough for AI to parse and extract. Never exceed 5 sentences in a single paragraph.
 29. NO FILLER: Every sentence must contain a fact, a tip, or a specific actionable detail. Remove any sentence that exists just to fill space or transition generically.
+30. COMPARISON TABLES: For pricing data and side-by-side comparisons, use HTML tables (<table>, <thead>, <tbody>, <tr>, <th>, <td>). Tables are especially valuable in data-heavy and comparison style articles. Include at least one table when comparing parking options, rates, or features across providers.
+31. VERIFICATION DATES: When citing promo codes, specific rates, or time-sensitive facts, add "(verified [Month Year])" inline — e.g., "The early bird rate is $18/day (verified February 2026)." This builds trust and signals freshness.
+32. PAA TARGETS: Include 2-3 "People Also Ask" style questions as H2 or H3 headings, targeting common related queries that searchers ask about this topic. For example, if writing about JFK parking deals, include headings like "Is There Free Parking at JFK?" or "How Early Should I Book JFK Parking?"
 
 Respond with ONLY valid JSON in this exact format:
 {

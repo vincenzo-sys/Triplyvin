@@ -1,4 +1,5 @@
 import { DOMAIN, BLOG_BASE_URL } from '../config.js'
+import { getExternalLinks, formatExternalLinksForPrompt } from '../external-links.js'
 
 type ArticleStyle = 'standard' | 'narrative' | 'listicle' | 'data-heavy' | 'comparison'
 
@@ -35,8 +36,14 @@ function getStyleEditPreamble(style: ArticleStyle): string {
   }
 }
 
-export function buildEditPrompt(html: string, keyword: string, articleType: string, articleStyle?: ArticleStyle): string {
+export function buildEditPrompt(html: string, keyword: string, articleType: string, articleStyle?: ArticleStyle, airportCode?: string): string {
   const stylePreamble = getStyleEditPreamble(articleStyle || 'standard')
+  const externalLinksSection = airportCode
+    ? (() => {
+        const links = getExternalLinks(airportCode, articleType)
+        return links.length > 0 ? '\n' + formatExternalLinksForPrompt(links, articleType) : ''
+      })()
+    : ''
 
   return `You are a senior editor reviewing an airport parking blog article for ${DOMAIN}.
 
@@ -50,7 +57,8 @@ ${html}
 1. Factual accuracy — remove any made-up statistics or prices. Use phrases like "typically ranges from" instead of specific numbers unless commonly known
 2. Keyword usage — target keyword should appear naturally in the first paragraph, at least 2 H2s, and the conclusion. Don't over-optimize
 3. Internal links — verify all links use ${BLOG_BASE_URL}/[slug] format. Remove any broken-looking links
-4. HTML validity — only these tags allowed: h2, h3, p, ul, ol, li, a, strong, em, blockquote. Remove anything else
+3b. External links — verify all external URLs exist in the approved database below. Replace any fabricated URLs with verified ones from the database. Add rel="nofollow" where the database specifies it. Ensure anchor text is descriptive (never "click here"). Check domain diversity (max 2 links to same domain).${externalLinksSection}
+4. HTML validity — only these tags allowed: h2, h3, p, ul, ol, li, a, strong, em, blockquote, table, thead, tbody, tr, th, td. Remove anything else
 5. Readability (Flesch-Kincaid grade 6-9 target) — break up long paragraphs (max 3-5 sentences). CRITICAL: also check SENTENCE LENGTH — average should be 15-20 words, never exceed 30 words. Split compound sentences into two. Prefer simple words ("use" not "utilize", "help" not "facilitate", "near" not "in proximity to"). Use active voice ("The shuttle picks you up" not "You will be picked up"). If the writing feels dense or academic, simplify aggressively.
 6. BOOKING CTAs — this is about CONVERSION, not just brand mention. Check TWO things:
    a) EARLY CTA: Within the first 500 words, there MUST be a contextual call-to-action with a link to https://www.${DOMAIN}/search or similar. The CTA MUST reference something specific from the surrounding content — a terminal name, a price range, a parking type, or the airport name. If a CTA is generic ("Compare rates on Triply" with no context), rewrite it to reference the nearest specific detail (e.g., "Compare Terminal 4 parking rates" or "Find deals starting under $10/day").
@@ -70,6 +78,9 @@ ${html}
 16. NO FILLER — remove any sentence that doesn't contain a fact, tip, or specific useful detail. Cut generic transitions like "Let's dive in", "Read on to learn", "In this guide we'll cover".
 17. E-E-A-T LANGUAGE — ensure the article uses credibility phrases like "based on current rates", "according to airport data", "travelers report", "as of 2026". Remove any generic claims without grounding.
 18. FRESHNESS — for rates, policies, and construction updates, ensure timeframe references ("as of 2026", "current rates"). Don't add year references to evergreen facts. Remove any outdated year references (2024, 2023, etc.).
+19. COMPARISON TABLES — if the article compares parking options, rates, or features across providers, verify it contains at least one HTML <table>. If comparison data is buried in prose or lists, convert it to a table for better scannability and featured-snippet eligibility.
+20. VERIFICATION DATES — check that time-sensitive claims (promo codes, specific rates, shuttle schedules, construction timelines) include a verification date like "(verified February 2026)" or "as of 2026". Add one if missing.
+21. TABLE PRESENCE — for data-heavy or comparison style articles, ensure at least one HTML table exists. If the article has pricing data presented only in lists, restructure the most data-dense comparison into a table.
 
 Respond with ONLY valid JSON in this exact format:
 {

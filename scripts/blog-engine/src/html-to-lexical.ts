@@ -57,6 +57,7 @@ interface LexicalLinkNode extends LexicalElementNode {
     linkType: 'custom'
     url: string
     newTab: boolean
+    rel?: string
   }
 }
 
@@ -64,6 +65,12 @@ interface LexicalQuoteNode extends LexicalElementNode {
   type: 'quote'
   textFormat: number
   textStyle: string
+}
+
+interface LexicalTableNode {
+  type: 'table'
+  html: string
+  version: 1
 }
 
 interface LexicalRootNode {
@@ -84,6 +91,7 @@ type LexicalNode =
   | LexicalListItemNode
   | LexicalLinkNode
   | LexicalQuoteNode
+  | LexicalTableNode
   | LexicalElementNode
 
 export interface LexicalDocument {
@@ -171,18 +179,27 @@ function makeListItemNode(children: LexicalNode[], value = 1): LexicalListItemNo
   }
 }
 
-function makeLinkNode(url: string, children: LexicalNode[]): LexicalLinkNode {
+function makeLinkNode(url: string, children: LexicalNode[], rel?: string): LexicalLinkNode {
   return {
     type: 'link',
     fields: {
       linkType: 'custom',
       url,
       newTab: false,
+      ...(rel ? { rel } : {}),
     },
     children,
     direction: 'ltr',
     format: '',
     indent: 0,
+    version: 1,
+  }
+}
+
+function makeTableNode(html: string): LexicalTableNode {
+  return {
+    type: 'table',
+    html,
     version: 1,
   }
 }
@@ -234,9 +251,10 @@ function convertInlineChildren(node: HTMLElement | Node, inheritFormat = 0): Lex
         break
       case 'a': {
         const href = el.getAttribute('href') || ''
+        const rel = el.getAttribute('rel') || undefined
         const linkChildren = convertInlineChildren(el, inheritFormat)
         if (linkChildren.length > 0) {
-          result.push(makeLinkNode(href, linkChildren))
+          result.push(makeLinkNode(href, linkChildren, rel))
         }
         break
       }
@@ -330,6 +348,11 @@ function convertBlockElement(el: HTMLElement): LexicalNode[] {
       const children = convertInlineChildren(el)
       if (children.length === 0) children.push(makeTextNode(''))
       return [makeQuoteNode(children)]
+    }
+
+    case 'table': {
+      const tableHtml = el.outerHTML
+      return [makeTableNode(tableHtml)]
     }
 
     case 'br':

@@ -15,7 +15,9 @@ type LexicalNode = {
     linkType?: string
     url?: string
     newTab?: boolean
+    rel?: string
   }
+  html?: string
   newTab?: boolean
   src?: string
   altText?: string
@@ -135,12 +137,22 @@ function renderNode(node: LexicalNode, index: number): React.ReactNode {
     case 'autolink': {
       const linkUrl = node.fields?.url || node.url
       const openNewTab = node.fields?.newTab ?? node.newTab
+      const fieldRel = node.fields?.rel
+      const relParts = new Set<string>()
+      if (openNewTab) {
+        relParts.add('noopener')
+        relParts.add('noreferrer')
+      }
+      if (fieldRel) {
+        fieldRel.split(/\s+/).forEach((r) => relParts.add(r))
+      }
+      const relStr = relParts.size > 0 ? Array.from(relParts).join(' ') : undefined
       return (
         <a
           key={key}
           href={linkUrl}
           target={openNewTab ? '_blank' : undefined}
-          rel={openNewTab ? 'noopener noreferrer' : undefined}
+          rel={relStr}
           className="text-coral hover:underline"
         >
           {node.children?.map((child, i) => renderNode(child, i))}
@@ -189,6 +201,23 @@ function renderNode(node: LexicalNode, index: number): React.ReactNode {
 
     case 'horizontalrule':
       return <hr key={key} className="my-8 border-gray-200" />
+
+    case 'table':
+      if (node.html) {
+        return (
+          <div
+            key={key}
+            className="my-6 overflow-x-auto"
+            dangerouslySetInnerHTML={{
+              __html: node.html.replace(
+                '<table',
+                '<table class="w-full border-collapse text-sm [&_th]:bg-gray-50 [&_th]:font-semibold [&_th]:text-left [&_th]:px-4 [&_th]:py-2 [&_th]:border [&_th]:border-gray-200 [&_td]:px-4 [&_td]:py-2 [&_td]:border [&_td]:border-gray-200"'
+              ),
+            }}
+          />
+        )
+      }
+      return null
 
     default:
       // For unknown nodes, try to render children
