@@ -45,11 +45,16 @@ const AnalysisResultSchema = z.object({
   suggestedTags: z.array(z.string()),
 })
 
+function truncateAtWord(text: string, max: number): string {
+  if (text.length <= max) return text
+  return text.slice(0, max - 3).replace(/\s\S*$/, '...')
+}
+
 const WriteResultSchema = z.object({
   html: z.string(),
   excerpt: z.string(),
-  metaTitle: z.string(),
-  metaDescription: z.string(),
+  metaTitle: z.string().transform(s => truncateAtWord(s, 60)),
+  metaDescription: z.string().transform(s => truncateAtWord(s, 160)),
   earlyCta: z.string().optional(),
   closingCta: z.string().optional(),
   faqItems: z.array(z.object({ question: z.string(), answer: z.string() })),
