@@ -67,12 +67,6 @@ interface LexicalQuoteNode extends LexicalElementNode {
   textStyle: string
 }
 
-interface LexicalTableNode {
-  type: 'table'
-  html: string
-  version: 1
-}
-
 export interface LexicalUploadNode {
   type: 'upload'
   relationTo: 'media'
@@ -104,7 +98,6 @@ type LexicalNode =
   | LexicalListItemNode
   | LexicalLinkNode
   | LexicalQuoteNode
-  | LexicalTableNode
   | LexicalUploadNode
   | LexicalElementNode
 
@@ -206,14 +199,6 @@ function makeLinkNode(url: string, children: LexicalNode[], rel?: string): Lexic
     direction: 'ltr',
     format: '',
     indent: 0,
-    version: 1,
-  }
-}
-
-function makeTableNode(html: string): LexicalTableNode {
-  return {
-    type: 'table',
-    html,
     version: 1,
   }
 }
@@ -368,8 +353,80 @@ function convertBlockElement(el: HTMLElement): LexicalNode[] {
     }
 
     case 'table': {
-      const tableHtml = el.outerHTML
-      return [makeTableNode(tableHtml)]
+      // Convert HTML tables to structured bullet lists to avoid Lexical error #17
+      // (CMS editor doesn't have TableFeature registered)
+
+      // Collect <tr> elements from thead, tbody, tfoot, or direct children
+      const rowEls: HTMLElement[] = []
+      for (const child of el.childNodes) {
+        if (child.nodeType !== NodeType.ELEMENT_NODE) continue
+        const childEl = child as HTMLElement
+        const childTag = childEl.tagName?.toLowerCase()
+        if (childTag === 'tr') {
+          rowEls.push(childEl)
+        } else if (childTag === 'thead' || childTag === 'tbody' || childTag === 'tfoot') {
+          for (const grandchild of childEl.childNodes) {
+            if (grandchild.nodeType === NodeType.ELEMENT_NODE && (grandchild as HTMLElement).tagName?.toLowerCase() === 'tr') {
+              rowEls.push(grandchild as HTMLElement)
+            }
+          }
+        }
+      }
+
+      if (rowEls.length === 0) return []
+
+      // Extract header names from the first row if it contains <th> cells
+      const headers: string[] = []
+      const firstRow = rowEls[0]
+      let dataStartIndex = 0
+      for (const cellChild of firstRow.childNodes) {
+        if (cellChild.nodeType !== NodeType.ELEMENT_NODE) continue
+        const cellEl = cellChild as HTMLElement
+        if (cellEl.tagName?.toLowerCase() === 'th') {
+          headers.push(cellEl.textContent.trim())
+        }
+      }
+      if (headers.length > 0) {
+        dataStartIndex = 1 // skip the header row
+      }
+
+      // Build list items from data rows
+      const items: LexicalNode[] = []
+      let itemIndex = 1
+      for (let i = dataStartIndex; i < rowEls.length; i++) {
+        const rowEl = rowEls[i]
+        const cellTexts: string[] = []
+        for (const cellChild of rowEl.childNodes) {
+          if (cellChild.nodeType !== NodeType.ELEMENT_NODE) continue
+          const cellEl = cellChild as HTMLElement
+          const cellTag = cellEl.tagName?.toLowerCase()
+          if (cellTag === 'th' || cellTag === 'td') {
+            cellTexts.push(cellEl.textContent.trim())
+          }
+        }
+
+        if (cellTexts.length === 0) continue
+
+        // Build inline nodes: **Header**: value | **Header**: value
+        const inlineNodes: LexicalNode[] = []
+        for (let c = 0; c < cellTexts.length; c++) {
+          if (c > 0) {
+            inlineNodes.push(makeTextNode(' | '))
+          }
+          if (headers.length > 0 && c < headers.length) {
+            inlineNodes.push(makeTextNode(`${headers[c]}: `, FORMAT_BOLD))
+            inlineNodes.push(makeTextNode(cellTexts[c]))
+          } else {
+            inlineNodes.push(makeTextNode(cellTexts[c]))
+          }
+        }
+
+        items.push(makeListItemNode(inlineNodes, itemIndex))
+        itemIndex++
+      }
+
+      if (items.length === 0) return []
+      return [makeListNode('bullet', 'ul', items)]
     }
 
     case 'br':
