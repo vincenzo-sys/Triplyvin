@@ -1,4 +1,5 @@
 import { DOMAIN, BLOG_BASE_URL } from '../config.js'
+import type { PublishedPost } from '../payload.js'
 import { getExternalLinks, formatExternalLinksForPrompt } from '../external-links.js'
 
 type ArticleStyle = 'standard' | 'narrative' | 'listicle' | 'data-heavy' | 'comparison'
@@ -36,7 +37,7 @@ function getStyleEditPreamble(style: ArticleStyle): string {
   }
 }
 
-export function buildEditPrompt(html: string, keyword: string, articleType: string, articleStyle?: ArticleStyle, airportCode?: string): string {
+export function buildEditPrompt(html: string, keyword: string, articleType: string, articleStyle?: ArticleStyle, airportCode?: string, publishedPosts?: PublishedPost[], failedChecks?: string[]): string {
   const stylePreamble = getStyleEditPreamble(articleStyle || 'standard')
   const externalLinksSection = airportCode
     ? (() => {
@@ -45,10 +46,18 @@ export function buildEditPrompt(html: string, keyword: string, articleType: stri
       })()
     : ''
 
-  return `You are a senior editor reviewing an airport parking blog article for ${DOMAIN}.
+  const failedChecksSection = failedChecks && failedChecks.length > 0
+    ? `\n**PRIORITY FIXES — the previous draft scored below target. Fix these failing checks FIRST:**\n${failedChecks.map(c => `- ${c}`).join('\n')}\n`
+    : ''
 
+  const publishedPostsSection = publishedPosts && publishedPosts.length > 0
+    ? `\n**Published articles (use EXACT slugs for internal links):**\n${publishedPosts.map(p => `- ${BLOG_BASE_URL}/${p.slug} — "${p.title}" (${p.articleType})`).join('\n')}\nONLY link to slugs from this list. Remove any internal blog links that don't match a slug above.\n`
+    : ''
+
+  return `You are a senior editor reviewing an airport parking blog article for ${DOMAIN}.
+${failedChecksSection}
 Review and improve this article. The target keyword is "${keyword}" and the article type is "${articleType}".
-${stylePreamble ? `\n${stylePreamble}\n` : ''}
+${stylePreamble ? `\n${stylePreamble}\n` : ''}${publishedPostsSection}
 <article>
 ${html}
 </article>

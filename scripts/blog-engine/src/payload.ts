@@ -113,6 +113,33 @@ export async function getApiUser() {
   return result.user || null
 }
 
+// Published posts (for internal link intelligence)
+export interface PublishedPost {
+  slug: string
+  title: string
+  articleType: string
+  airportCode: string
+}
+
+export async function getAllPublishedSlugs(airportCode?: string): Promise<PublishedPost[]> {
+  const params = new URLSearchParams({
+    'where[status][equals]': 'published',
+    limit: '500',
+    select: 'slug,title,articleType,airportCode',
+  })
+  if (airportCode) {
+    params.set('where[airportCode][equals]', airportCode.toUpperCase())
+  }
+
+  const result = await payloadFetch(`/posts?${params.toString()}`)
+  return (result.docs || []).map((doc: Record<string, unknown>) => ({
+    slug: doc.slug as string,
+    title: doc.title as string,
+    articleType: (doc.articleType as string) || 'spoke',
+    airportCode: (doc.airportCode as string) || '',
+  }))
+}
+
 // Content Queue
 export async function getQueueItems(filters: Record<string, string> = {}) {
   const params = new URLSearchParams({ sort: 'priority' })

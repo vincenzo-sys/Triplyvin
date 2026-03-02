@@ -27,9 +27,10 @@ if (!parsed.success) {
 export const env = parsed.data
 
 // Constants
-export const CLAUDE_MODEL = 'claude-sonnet-4-5-20250929'
+export const CLAUDE_MODEL = 'claude-sonnet-4-6-20250827'
 export const MAX_TOKENS = 16384
 export const SCRAPE_DELAY_MS = 3000
 export const SCRAPE_TIMEOUT_MS = 15000
 export const DOMAIN = 'triplypro.com'
 export const BLOG_BASE_URL = `https://www.${DOMAIN}/blog`
+export const REVISION_THRESHOLD = 85 // Re-edit if SEO score is below B+ (85/100)

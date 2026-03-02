@@ -10,6 +10,12 @@ export interface ScrapedArticle {
   title: string
   content: string
   headings: string[]
+  wordCount: number
+  linkCount: number
+  faqCount: number
+  tableCount: number
+  listCount: number
+  h2Count: number
 }
 
 export async function searchGoogle(keyword: string, numResults = 5): Promise<string[]> {
@@ -80,7 +86,24 @@ export async function scrapeArticle(url: string): Promise<ScrapedArticle | null>
 
     const content = contentParts.join('\n\n').slice(0, 10000) // Limit to ~10k chars
 
-    return { url, title, content, headings }
+    // Extract structural metadata for competitor benchmarking
+    const fullText = article.text()
+    const wordCount = fullText.split(/\s+/).filter(w => w.length > 0).length
+    const linkCount = article.find('a[href]').length
+    const h2Count = article.find('h2').length
+    const tableCount = article.find('table').length
+    const listCount = article.find('ul, ol').length
+
+    // Count FAQ-like patterns (Q&A sections, schema FAQ, etc.)
+    let faqCount = 0
+    article.find('h2, h3').each((_, el) => {
+      const text = $(el).text().trim()
+      if (/^(how|what|where|when|why|which|is|are|do|does|can|should)/i.test(text) || text.endsWith('?')) {
+        faqCount++
+      }
+    })
+
+    return { url, title, content, headings, wordCount, linkCount, faqCount, tableCount, listCount, h2Count }
   } catch (err) {
     console.log(`  ⚠ Error scraping ${url}: ${err instanceof Error ? err.message : err}`)
     return null

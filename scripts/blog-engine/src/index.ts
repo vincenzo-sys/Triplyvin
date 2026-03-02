@@ -17,6 +17,7 @@ import {
   findOrCreateTag,
   getApiUser,
   getQueueItems,
+  getAllPublishedSlugs,
 } from './payload.js'
 import { env } from './config.js'
 import { loadAirportData } from './airport-data.js'
@@ -90,6 +91,12 @@ interface ArticleReport {
     uploadSeconds: number
   }
   seoScore: SeoScore | null
+  revision: {
+    triggered: boolean
+    scoreBefore: number
+    scoreAfter: number
+    failedChecks: string[]
+  } | null
   error: string | null
 }
 
@@ -148,6 +155,17 @@ function printReport(report: ArticleReport) {
     console.log(`    ... and ${report.editing.changes.length - 5} more`)
   }
 
+  if (report.revision) {
+    console.log(`\n  REVISION:`)
+    console.log(`    Triggered: ${report.revision.triggered ? 'Yes' : 'No'}`)
+    if (report.revision.triggered) {
+      console.log(`    Score before: ${report.revision.scoreBefore}`)
+      console.log(`    Score after: ${report.revision.scoreAfter}`)
+      console.log(`    Improvement: ${report.revision.scoreAfter - report.revision.scoreBefore >= 0 ? '+' : ''}${report.revision.scoreAfter - report.revision.scoreBefore} points`)
+      console.log(`    Failed checks addressed: ${report.revision.failedChecks.length}`)
+    }
+  }
+
   console.log(`\n  IMAGE:`)
   if (report.image.found) {
     console.log(`    File: ${report.image.filename}`)
@@ -197,6 +215,11 @@ program
 
       console.log(`Found ${items.length} queued item(s)\n`)
 
+      // Fetch all published slugs for internal link intelligence
+      console.log('Fetching published posts for internal linking...')
+      const publishedPosts = await getAllPublishedSlugs()
+      console.log(`  ✓ ${publishedPosts.length} published post(s) available for linking\n`)
+
       // Get the API user for the author field
       const apiUser = await getApiUser()
       if (!apiUser) {
@@ -238,6 +261,7 @@ program
           post: { postId: null, status: 'draft', categoryCreated: '', tagsCreated: [] },
           timing: { totalSeconds: 0, scrapeSeconds: 0, analyzeSeconds: 0, writeSeconds: 0, editSeconds: 0, uploadSeconds: 0 },
           seoScore: null,
+          revision: null,
           error: null,
         }
 
@@ -272,29 +296,40 @@ program
             console.log(`  ⚠ No verified data file for ${item.airportCode} — Claude will use general knowledge`)
           }
 
+          // Filter published posts to same airport (keep context focused)
+          const airportPosts = publishedPosts.filter(p =>
+            p.airportCode === item.airportCode || !p.airportCode
+          )
+
           // Generate with Claude (3-prompt pipeline)
           const result = await generateArticle(item, competitors, (step, data) => {
             // Callback to capture intermediate results for the report
+            const r = data.result as Record<string, unknown>
             if (step === 'analyze') {
               report.timing.analyzeSeconds = Math.round(data.elapsed / 1000)
               report.analysis = {
-                commonTopics: data.result.commonTopics || [],
-                contentGaps: data.result.gaps || [],
-                recommendedH2s: data.result.recommendedH2s || [],
-                faqQuestions: data.result.faqQuestions || [],
-                suggestedTags: data.result.suggestedTags || [],
+                commonTopics: (r.commonTopics as string[]) || [],
+                contentGaps: (r.gaps as string[]) || [],
+                recommendedH2s: (r.recommendedH2s as string[]) || [],
+                faqQuestions: (r.faqQuestions as string[]) || [],
+                suggestedTags: (r.suggestedTags as string[]) || [],
               }
             } else if (step === 'write') {
               report.timing.writeSeconds = Math.round(data.elapsed / 1000)
             } else if (step === 'edit') {
               report.timing.editSeconds = Math.round(data.elapsed / 1000)
               report.editing = {
-                changesCount: data.result.changes?.length || 0,
-                qualityScore: data.result.qualityScore || 0,
-                changes: data.result.changes || [],
+                changesCount: (r.changes as string[])?.length || 0,
+                qualityScore: (r.qualityScore as number) || 0,
+                changes: (r.changes as string[]) || [],
               }
             }
-          }, airportData || undefined)
+          }, airportData || undefined, airportPosts)
+
+          // Capture revision metadata
+          if (result.revision) {
+            report.revision = result.revision
+          }
 
           // Article stats
           report.article = {

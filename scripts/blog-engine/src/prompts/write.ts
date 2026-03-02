@@ -1,6 +1,7 @@
 import { DOMAIN, BLOG_BASE_URL } from '../config.js'
 import type { QueueItem } from '../queue.js'
 import type { AirportData } from '../airport-data.js'
+import type { PublishedPost } from '../payload.js'
 import { getExternalLinks, formatExternalLinksForPrompt } from '../external-links.js'
 
 interface AnalysisResult {
@@ -10,6 +11,13 @@ interface AnalysisResult {
   faqQuestions: string[]
   estimatedWordCount: number
   suggestedTags: string[]
+  competitorBenchmarks?: {
+    avgWordCount: number
+    avgH2Count: number
+    avgListCount: number
+    avgTableCount: number
+    avgLinkCount: number
+  }
 }
 
 function getArticleTypeInstructions(item: QueueItem): string {
@@ -122,10 +130,22 @@ function formatLiveSources(data: AirportData): string {
   return lines.length > 1 ? lines.join('\n') : ''
 }
 
+function formatPublishedPosts(posts: PublishedPost[]): string {
+  if (posts.length === 0) return ''
+
+  const lines = [
+    '\n**Published articles you can link to (use EXACT slugs):**',
+    ...posts.map(p => `- ${BLOG_BASE_URL}/${p.slug} — "${p.title}" (${p.articleType})`),
+    'ONLY link to slugs from this list. Do NOT invent blog URLs.\n',
+  ]
+  return lines.join('\n')
+}
+
 export function buildWritePrompt(
   item: QueueItem,
   analysis: AnalysisResult,
-  airportData?: AirportData
+  airportData?: AirportData,
+  publishedPosts?: PublishedPost[]
 ): string {
   const outlineSection = item.outline?.length
     ? `\n\nFollow this outline:\n${item.outline.map((o) => `${o.order}. ${o.heading}${o.summary ? ` — ${o.summary}` : ''}${o.linksTo ? ` [Link to: ${BLOG_BASE_URL}/${o.linksTo}]` : ''}`).join('\n')}`
@@ -140,14 +160,20 @@ Write an SEO-optimized blog article with the following parameters:
 **Airport:** ${item.airportCode}
 
 ${getArticleTypeInstructions(item)}
-
+${publishedPosts && publishedPosts.length > 0 ? formatPublishedPosts(publishedPosts) : ''}
 ${getStyleInstructions(item.articleStyle || 'standard', item)}
 ${outlineSection}
 
 ${airportData ? formatAirportData(airportData) + '\n\n' : ''}${(() => {
     const links = getExternalLinks(item.airportCode, item.articleType)
     return links.length > 0 ? formatExternalLinksForPrompt(links, item.articleType) + '\n' : ''
-  })()}**Topics to cover (from competitor analysis):** ${analysis.commonTopics.join(', ')}
+  })()}${analysis.competitorBenchmarks ? `**Competitor Benchmarks (match or exceed):**
+- Average word count: ${analysis.competitorBenchmarks.avgWordCount}
+- Average H2 headings: ${analysis.competitorBenchmarks.avgH2Count}
+- Average lists: ${analysis.competitorBenchmarks.avgListCount}
+- Average tables: ${analysis.competitorBenchmarks.avgTableCount}
+- Average links: ${analysis.competitorBenchmarks.avgLinkCount}
+` : ''}**Topics to cover (from competitor analysis):** ${analysis.commonTopics.join(', ')}
 **Content gaps to fill (unique angles):** ${analysis.gaps.join(', ')}
 
 **Writing rules:**
@@ -170,6 +196,13 @@ ${airportData ? formatAirportData(airportData) + '\n\n' : ''}${(() => {
 13. SIMPLE WORDS: Prefer common words over fancy ones. "use" not "utilize", "help" not "facilitate", "start" not "commence", "near" not "in proximity to". Write at an 8th-grade reading level.
 14. ACTIVE VOICE: Use active voice ("The shuttle picks you up") not passive ("You will be picked up by the shuttle"). Active voice is shorter and easier to parse.
 15. NO COMPOUND SENTENCES: Avoid stringing clauses together with semicolons or multiple commas. Instead of "The lot offers valet parking, which means you drive to the entrance, hand over your keys, and they park your car for you" — write two sentences.
+
+**Readability Examples (follow this quality bar):**
+BAD: "While the shuttle service at JFK provides complimentary transportation between parking and terminals, it's worth noting that during peak periods wait times can be significantly longer than the usual 5-10 minute intervals."
+GOOD: "JFK's free shuttle runs every 5-10 minutes. During holidays, expect longer waits. Plan an extra 15 minutes around Thanksgiving and Christmas."
+
+BAD: "For travelers seeking to minimize their overall parking expenditure while still maintaining convenient access to terminal facilities, the economy lot represents the most cost-effective option available."
+GOOD: "The economy lot is the cheapest option at $18/day. It's a 10-minute shuttle ride to the terminals. For most travelers, the savings outweigh the extra time."
 
 **AI Search & Featured Snippet Optimization (CRITICAL — follow these closely):**
 16. OPENING ANSWER: The very first paragraph must be a concise, direct answer to the main query implied by the title. It should be extractable on its own — if someone only read this one paragraph, they'd get the core answer. AI search engines pull this as the primary citation.
