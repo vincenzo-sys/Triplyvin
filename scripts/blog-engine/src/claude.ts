@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
-import { env, CLAUDE_MODEL, MAX_TOKENS, DOMAIN, REVISION_THRESHOLD } from './config.js'
+import { env, CLAUDE_MODEL, MAX_TOKENS, DOMAIN, REVISION_THRESHOLDS, HARD_FLOOR_SCORE } from './config.js'
 import { scoreArticle } from './seo-scorer.js'
 import type { SeoScore } from './seo-scorer.js'
 import { buildAnalyzePrompt } from './prompts/analyze.js'
@@ -24,6 +24,13 @@ interface CompetitorBenchmarks {
 interface AnalysisResult {
   commonTopics: string[]
   gaps: string[]
+  topicGaps?: string[]
+  depthGaps?: string[]
+  dataGaps?: string[]
+  entityGaps?: string[]
+  entityFrequency?: { entity: string; mentions: number }[]
+  structuralPatterns?: string[]
+  contentFormats?: string[]
   recommendedH2s: string[]
   faqQuestions: string[]
   estimatedWordCount: number
@@ -59,6 +66,13 @@ const CompetitorBenchmarksSchema = z.object({
 const AnalysisResultSchema = z.object({
   commonTopics: z.array(z.string()),
   gaps: z.array(z.string()),
+  topicGaps: z.array(z.string()).optional(),
+  depthGaps: z.array(z.string()).optional(),
+  dataGaps: z.array(z.string()).optional(),
+  entityGaps: z.array(z.string()).optional(),
+  entityFrequency: z.array(z.object({ entity: z.string(), mentions: z.number() })).optional(),
+  structuralPatterns: z.array(z.string()).optional(),
+  contentFormats: z.array(z.string()).optional(),
   recommendedH2s: z.array(z.string()),
   faqQuestions: z.array(z.string()),
   estimatedWordCount: z.number(),
@@ -164,7 +178,7 @@ async function callClaude(prompt: string, system?: SystemMessage): Promise<strin
   throw lastError!
 }
 
-function validateCta(field: string, cta: string | undefined, airportCode: string): string[] {
+function validateCta(field: string, cta: string | undefined, airportCode: string, keyword?: string): string[] {
   const issues: string[] = []
 
   if (!cta) {
@@ -188,6 +202,17 @@ function validateCta(field: string, cta: string | undefined, airportCode: string
     const msg = `${field}: Generic CTA detected — "${cta.slice(0, 80)}" (needs airport code, price, terminal, or parking type)`
     console.warn(`  ⚠ ${msg}`)
     issues.push(msg)
+  }
+
+  // Check keyword relevance
+  if (keyword) {
+    const kwWords = keyword.toLowerCase().split(/\s+/).filter(w => w.length > 3)
+    const hasKeywordTerm = kwWords.some(w => lower.includes(w))
+    if (!hasKeywordTerm) {
+      const msg = `${field}: CTA doesn't reference article topic — "${cta.slice(0, 60)}" (missing keyword terms: ${kwWords.join(', ')})`
+      console.warn(`  ⚠ ${msg}`)
+      issues.push(msg)
+    }
   }
 
   return issues
@@ -234,10 +259,12 @@ export async function editArticle(
   articleStyle?: string,
   airportCode?: string,
   publishedPosts?: PublishedPost[],
-  failedChecks?: string[]
+  failedChecks?: string[],
+  analysis?: { recommendedH2s: string[]; gaps: string[]; commonTopics: string[]; competitorBenchmarks?: { avgWordCount: number; avgH2Count: number; avgListCount: number; avgTableCount: number; avgLinkCount: number } },
+  airportData?: AirportData
 ): Promise<EditResult> {
   console.log(failedChecks ? '  Step 3b/3: Re-editing with failed checks...' : '  Step 3/3: Editing & QA...')
-  const prompt = buildEditPrompt(html, keyword, articleType, articleStyle as 'standard' | 'narrative' | 'listicle' | 'data-heavy' | 'comparison' | undefined, airportCode, publishedPosts, failedChecks)
+  const prompt = buildEditPrompt(html, keyword, articleType, articleStyle as 'standard' | 'narrative' | 'listicle' | 'data-heavy' | 'comparison' | undefined, airportCode, publishedPosts, failedChecks, analysis, airportData)
   const systemBlocks: Anthropic.MessageCreateParams['system'] = [
     {
       type: 'text' as const,
@@ -272,6 +299,7 @@ export async function generateArticle(
     scoreAfter: number
     failedChecks: string[]
   }
+  suggestedStatus: 'draft' | 'review'
 }> {
   // Step 1: Analyze competitors
   const analyzeStart = Date.now()
@@ -283,9 +311,17 @@ export async function generateArticle(
   const writeResult = await writeArticle(item, analysis, airportData, publishedPosts)
   onStep?.('write', { elapsed: Date.now() - writeStart, result: writeResult as unknown as Record<string, unknown> })
 
+  // Build analysis context for the editor
+  const analysisContext = {
+    recommendedH2s: analysis.recommendedH2s,
+    gaps: analysis.gaps,
+    commonTopics: analysis.commonTopics,
+    competitorBenchmarks: analysis.competitorBenchmarks,
+  }
+
   // Step 3: Edit and QA
   const editStart = Date.now()
-  let editResult = await editArticle(writeResult.html, item.keyword, item.articleType, item.articleStyle, item.airportCode, publishedPosts)
+  let editResult = await editArticle(writeResult.html, item.keyword, item.articleType, item.articleStyle, item.airportCode, publishedPosts, undefined, analysisContext, airportData)
   onStep?.('edit', { elapsed: Date.now() - editStart, result: editResult as unknown as Record<string, unknown> })
 
   // Step 3b: Auto-revision loop — score and re-edit if below threshold
@@ -293,14 +329,19 @@ export async function generateArticle(
 
   // Validate CTAs and collect issues
   const ctaIssues = [
-    ...validateCta('earlyCta', writeResult.earlyCta, item.airportCode),
-    ...validateCta('closingCta', writeResult.closingCta, item.airportCode),
+    ...validateCta('earlyCta', writeResult.earlyCta, item.airportCode, item.keyword),
+    ...validateCta('closingCta', writeResult.closingCta, item.airportCode, item.keyword),
   ]
+  // Check CTAs are different
+  if (writeResult.earlyCta && writeResult.closingCta && writeResult.earlyCta === writeResult.closingCta) {
+    const msg = 'CTAs: Early and closing CTAs are identical — they should be different'
+    console.warn(`  ⚠ ${msg}`)
+    ctaIssues.push(msg)
+  }
 
   // Score the edited article
   const targetWords = item.targetWords || (item.articleType === 'hub' ? 2500 : item.articleType === 'sub-pillar' ? 1500 : 1000)
-  const firstScore = scoreArticle({
-    html: editResult.html,
+  const scorerBase = {
     keyword: item.keyword,
     slug: item.slug,
     metaTitle: writeResult.metaTitle,
@@ -308,13 +349,18 @@ export async function generateArticle(
     excerpt: writeResult.excerpt,
     faqItems: writeResult.faqItems,
     articleType: item.articleType as 'hub' | 'sub-pillar' | 'spoke',
+    articleStyle: item.articleStyle,
     targetWords,
     hasImage: false,
     imageAlt: null,
     airportCode: item.airportCode,
     parentSlug: item.parentSlug,
     hubSlug: item.hubSlug,
-  })
+    earlyCta: writeResult.earlyCta,
+    closingCta: writeResult.closingCta,
+  }
+
+  const firstScore = scoreArticle({ html: editResult.html, ...scorerBase })
 
   console.log(`  ✓ Initial SEO score: ${firstScore.total}/${firstScore.maxTotal} (${firstScore.grade})`)
 
@@ -326,31 +372,23 @@ export async function generateArticle(
     ),
   ]
 
-  if (firstScore.total < REVISION_THRESHOLD && failedChecks.length > 0) {
-    console.log(`  ⚠ Score ${firstScore.total} < ${REVISION_THRESHOLD} threshold — triggering re-edit with ${failedChecks.length} failed checks`)
+  // Type-aware threshold
+  const revisionThreshold = REVISION_THRESHOLDS[item.articleType] || 85
+  let currentScore = firstScore
+  let revisionPasses = 0
+  const maxPasses = item.articleType === 'hub' ? 2 : 1
+
+  while (currentScore.total < revisionThreshold && failedChecks.length > 0 && revisionPasses < maxPasses) {
+    revisionPasses++
+    console.log(`  ⚠ Score ${currentScore.total} < ${revisionThreshold} threshold (${item.articleType}) — revision pass ${revisionPasses}/${maxPasses} with ${failedChecks.length} failed checks`)
     const revisionStart = Date.now()
-    editResult = await editArticle(editResult.html, item.keyword, item.articleType, item.articleStyle, item.airportCode, publishedPosts, failedChecks)
+    editResult = await editArticle(editResult.html, item.keyword, item.articleType, item.articleStyle, item.airportCode, publishedPosts, failedChecks, analysisContext, airportData)
     onStep?.('revision', { elapsed: Date.now() - revisionStart, result: editResult as unknown as Record<string, unknown> })
 
     // Re-score
-    const revisedScore = scoreArticle({
-      html: editResult.html,
-      keyword: item.keyword,
-      slug: item.slug,
-      metaTitle: writeResult.metaTitle,
-      metaDescription: writeResult.metaDescription,
-      excerpt: writeResult.excerpt,
-      faqItems: writeResult.faqItems,
-      articleType: item.articleType as 'hub' | 'sub-pillar' | 'spoke',
-      targetWords,
-      hasImage: false,
-      imageAlt: null,
-      airportCode: item.airportCode,
-      parentSlug: item.parentSlug,
-      hubSlug: item.hubSlug,
-    })
+    const revisedScore = scoreArticle({ html: editResult.html, ...scorerBase })
 
-    console.log(`  ✓ Revised SEO score: ${revisedScore.total}/${revisedScore.maxTotal} (${revisedScore.grade}) — ${revisedScore.total >= firstScore.total ? '+' : ''}${revisedScore.total - firstScore.total} points`)
+    console.log(`  ✓ Revised SEO score: ${revisedScore.total}/${revisedScore.maxTotal} (${revisedScore.grade}) — ${revisedScore.total >= currentScore.total ? '+' : ''}${revisedScore.total - currentScore.total} points`)
 
     revisionMeta = {
       triggered: true,
@@ -358,6 +396,22 @@ export async function generateArticle(
       scoreAfter: revisedScore.total,
       failedChecks,
     }
+
+    // Update failed checks for next pass
+    currentScore = revisedScore
+    failedChecks.length = 0
+    failedChecks.push(
+      ...ctaIssues,
+      ...currentScore.categories.flatMap(cat =>
+        cat.checks.filter(c => !c.passed).map(c => `[${cat.name}] ${c.name}: ${c.detail}`)
+      ),
+    )
+  }
+
+  // Hard floor: articles below threshold after all passes get flagged for human review
+  const suggestedStatus = currentScore.total < HARD_FLOOR_SCORE ? 'review' : 'draft'
+  if (suggestedStatus === 'review') {
+    console.log(`  ⚠ Final score ${currentScore.total} < ${HARD_FLOOR_SCORE} hard floor — flagging for human review`)
   }
 
   return {
@@ -370,5 +424,6 @@ export async function generateArticle(
     suggestedTags: analysis.suggestedTags,
     qualityScore: editResult.qualityScore,
     revision: revisionMeta,
+    suggestedStatus,
   }
 }

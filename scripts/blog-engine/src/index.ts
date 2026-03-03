@@ -18,6 +18,7 @@ import {
   getApiUser,
   getQueueItems,
   getAllPublishedSlugs,
+  updateQueueItem,
 } from './payload.js'
 import { env } from './config.js'
 import { loadAirportData } from './airport-data.js'
@@ -413,8 +414,9 @@ program
             report.post.tagsCreated.push(tagName)
           }
 
-          // Create the post as a draft
-          console.log('  Creating draft post in CMS...')
+          // Create the post — draft or review based on quality score
+          const postStatus = result.suggestedStatus || 'draft'
+          console.log(`  Creating ${postStatus} post in CMS...`)
           const postData: Record<string, unknown> = {
             title: item.suggestedTitle,
             slug: item.slug,
@@ -423,7 +425,7 @@ program
             category: category.doc?.id || category.id,
             tags: tagIds,
             author: apiUser.id,
-            status: 'draft',
+            status: postStatus,
             airportCode: item.airportCode,
             articleType: item.articleType,
             parentSlug: item.parentSlug || undefined,
@@ -449,8 +451,12 @@ program
           const postId = post.doc?.id || post.id
           report.post.postId = postId
 
-          // Update queue item
-          await markDraft(item.id, postId)
+          // Update queue item status to match the post
+          if (postStatus === 'review') {
+            await updateQueueItem(item.id, { status: 'review', generatedPost: postId })
+          } else {
+            await markDraft(item.id, postId)
+          }
 
           report.timing.totalSeconds = Math.round((Date.now() - totalStart) / 1000)
 

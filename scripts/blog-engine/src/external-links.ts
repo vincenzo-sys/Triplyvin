@@ -67,6 +67,49 @@ export function getExternalLinks(
 }
 
 /**
+ * Get all approved domains for an airport (from external-links.json + liveSources).
+ * Returns a Set of domain strings (without www. prefix) for efficient lookup.
+ */
+export function getApprovedDomains(airportCode: string): Set<string> {
+  const domains = new Set<string>()
+  const db = loadDB()
+  const code = airportCode.toUpperCase()
+
+  // Add domains from external links DB
+  for (const link of db.links) {
+    if (link.status !== 'active' && link.status !== 'cloudflare-blocked') continue
+    const airportMatch = link.relevantAirports.includes(code) || link.relevantAirports.includes('all')
+    if (airportMatch) {
+      domains.add(link.domain.replace(/^www\./, ''))
+    }
+  }
+
+  // Also try loading airport data for liveSources domains
+  try {
+    const fs = require('fs')
+    const path = require('path')
+    const dataPath = path.resolve(__dirname, '..', 'data', 'airports', `${code}.json`)
+    if (fs.existsSync(dataPath)) {
+      const data = JSON.parse(fs.readFileSync(dataPath, 'utf-8'))
+      if (data.liveSources) {
+        for (const [, value] of Object.entries(data.liveSources)) {
+          if (typeof value === 'string') continue
+          if (value && typeof value === 'object') {
+            for (const url of Object.values(value as Record<string, string>)) {
+              try {
+                domains.add(new URL(url).hostname.replace(/^www\./, ''))
+              } catch { /* skip malformed URLs */ }
+            }
+          }
+        }
+      }
+    }
+  } catch { /* airport data not available */ }
+
+  return domains
+}
+
+/**
  * Format external links into a prompt-ready string for the AI writer.
  * Groups by authority level and includes anchor text + usage guidance.
  */

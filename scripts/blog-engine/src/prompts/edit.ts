@@ -1,8 +1,22 @@
 import { DOMAIN, BLOG_BASE_URL } from '../config.js'
 import type { PublishedPost } from '../payload.js'
+import type { AirportData } from '../airport-data.js'
 import { getExternalLinks, formatExternalLinksForPrompt } from '../external-links.js'
 
 type ArticleStyle = 'standard' | 'narrative' | 'listicle' | 'data-heavy' | 'comparison'
+
+interface AnalysisContext {
+  recommendedH2s: string[]
+  gaps: string[]
+  commonTopics: string[]
+  competitorBenchmarks?: {
+    avgWordCount: number
+    avgH2Count: number
+    avgListCount: number
+    avgTableCount: number
+    avgLinkCount: number
+  }
+}
 
 function getStyleEditPreamble(style: ArticleStyle): string {
   switch (style) {
@@ -37,7 +51,7 @@ function getStyleEditPreamble(style: ArticleStyle): string {
   }
 }
 
-export function buildEditPrompt(html: string, keyword: string, articleType: string, articleStyle?: ArticleStyle, airportCode?: string, publishedPosts?: PublishedPost[], failedChecks?: string[]): string {
+export function buildEditPrompt(html: string, keyword: string, articleType: string, articleStyle?: ArticleStyle, airportCode?: string, publishedPosts?: PublishedPost[], failedChecks?: string[], analysis?: AnalysisContext, airportData?: AirportData): string {
   const stylePreamble = getStyleEditPreamble(articleStyle || 'standard')
   const externalLinksSection = airportCode
     ? (() => {
@@ -54,8 +68,27 @@ export function buildEditPrompt(html: string, keyword: string, articleType: stri
     ? `\n**Published articles (use EXACT slugs for internal links):**\n${publishedPosts.map(p => `- ${BLOG_BASE_URL}/${p.slug} — "${p.title}" (${p.articleType})`).join('\n')}\nONLY link to slugs from this list. Remove any internal blog links that don't match a slug above.\n`
     : ''
 
+  const analysisSection = analysis
+    ? `\n**Competitor Analysis (use for gap-checking and fact verification):**
+- Recommended H2s: ${analysis.recommendedH2s.join(', ')}
+- Content gaps to cover: ${analysis.gaps.join(', ')}
+- Common topics across competitors: ${analysis.commonTopics.join(', ')}${analysis.competitorBenchmarks ? `
+- Competitor benchmarks: ~${analysis.competitorBenchmarks.avgWordCount} words, ~${analysis.competitorBenchmarks.avgH2Count} H2s, ~${analysis.competitorBenchmarks.avgListCount} lists, ~${analysis.competitorBenchmarks.avgTableCount} tables` : ''}
+Verify this article covers the identified gaps. If a recommended H2 topic is entirely missing, add a section for it.\n`
+    : ''
+
+  const airportDataSection = airportData
+    ? `\n**Verified Airport Data (use for FACT-CHECKING — correct any wrong rates/times/names):**
+- Official parking rates: ${airportData.parkingRates}
+- Shuttle info: ${airportData.shuttleInfo}
+- Terminals: ${airportData.terminals.map(t => t.name).join(', ')}
+- Transit: ${airportData.transit.join(', ')}${airportData.parkingLots && airportData.parkingLots.length > 0 ? `
+- Verified lot prices: ${(airportData.parkingLots as Record<string, unknown>[]).filter(l => typeof l.dailyRate === 'number').sort((a, b) => (a.dailyRate as number) - (b.dailyRate as number)).slice(0, 10).map(l => `${l.name} $${l.dailyRate}/day`).join(', ')}` : ''}
+If the article cites specific rates that don't match this data, correct them. If rates are vague, replace with specific verified rates.\n`
+    : ''
+
   return `You are a senior editor reviewing an airport parking blog article for ${DOMAIN}.
-${failedChecksSection}
+${failedChecksSection}${analysisSection}${airportDataSection}
 Review and improve this article. The target keyword is "${keyword}" and the article type is "${articleType}".
 ${stylePreamble ? `\n${stylePreamble}\n` : ''}${publishedPostsSection}
 <article>

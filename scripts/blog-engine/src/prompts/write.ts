@@ -7,6 +7,13 @@ import { getExternalLinks, formatExternalLinksForPrompt } from '../external-link
 interface AnalysisResult {
   commonTopics: string[]
   gaps: string[]
+  topicGaps?: string[]
+  depthGaps?: string[]
+  dataGaps?: string[]
+  entityGaps?: string[]
+  entityFrequency?: { entity: string; mentions: number }[]
+  structuralPatterns?: string[]
+  contentFormats?: string[]
   recommendedH2s: string[]
   faqQuestions: string[]
   estimatedWordCount: number
@@ -96,12 +103,112 @@ function getStyleInstructions(style: ArticleStyle, item: QueueItem): string {
   }
 }
 
-function formatAirportData(data: AirportData): string {
+function formatParkingLots(data: AirportData, keyword: string): string {
+  if (!data.parkingLots || data.parkingLots.length === 0) return ''
+
+  // Sort by daily rate ascending, take top 20
+  const lots = [...data.parkingLots]
+    .filter((lot: Record<string, unknown>) => typeof lot.dailyRate === 'number')
+    .sort((a: Record<string, unknown>, b: Record<string, unknown>) => (a.dailyRate as number) - (b.dailyRate as number))
+    .slice(0, 20)
+
+  if (lots.length === 0) return ''
+
+  const lines: string[] = ['\n**Off-Site Parking Lots (sorted by price — cite specific lots and rates):**']
+  for (const lot of lots) {
+    const l = lot as Record<string, unknown>
+    let line = `- **${l.name}**: $${l.dailyRate}/day`
+    if (l.driveTime) line += ` | ${l.driveTime} from airport`
+    if (l.parkingType) line += ` | ${l.parkingType}`
+    if (l.shuttleInfo) line += ` | Shuttle: ${(l.shuttleInfo as string).slice(0, 100)}`
+    if (l.amenities && Array.isArray(l.amenities) && l.amenities.length > 0) {
+      line += ` | Amenities: ${(l.amenities as string[]).join(', ')}`
+    }
+    if (l.knownCoupons && Array.isArray(l.knownCoupons) && l.knownCoupons.length > 0) {
+      line += ` | Coupons: ${(l.knownCoupons as string[]).join('; ')}`
+    }
+    if (l.freeCancellation) line += ' | Free cancellation'
+    lines.push(line)
+  }
+
+  const cheapest = lots[0] as Record<string, unknown>
+  const mostExpensive = lots[lots.length - 1] as Record<string, unknown>
+  lines.push(`\nPrice range: $${cheapest.dailyRate}/day — $${mostExpensive.dailyRate}/day across ${lots.length} verified lots.`)
+
+  return lines.join('\n')
+}
+
+function formatOnAirportParking(data: AirportData): string {
+  if (!data.onAirportParking) return ''
+  const parking = data.onAirportParking as Record<string, Record<string, unknown>>
+  const lines: string[] = ['\n**On-Airport Parking Options:**']
+  for (const [key, info] of Object.entries(parking)) {
+    if (typeof info === 'string') {
+      lines.push(`- ${key}: ${info}`)
+      continue
+    }
+    const parts: string[] = [`- **${key}**`]
+    if (info.rate) parts.push(`${info.rate}`)
+    if (info.dailyMax) parts.push(`max $${info.dailyMax}/day`)
+    if (info.preBookRate) parts.push(`pre-book $${info.preBookRate}/day`)
+    if (info.terminals) parts.push(`near ${info.terminals}`)
+    if (info.location) parts.push(`at ${info.location}`)
+    if (info.connection) parts.push(`(${info.connection})`)
+    if (info.cost) parts.push(String(info.cost))
+    if (info.description) parts.push(String(info.description))
+    lines.push(parts.join(' | '))
+  }
+  return lines.join('\n')
+}
+
+function formatEvCharging(data: AirportData): string {
+  if (!data.evCharging) return ''
+  const ev = data.evCharging as Record<string, unknown>
+  const lines: string[] = ['\n**EV Charging Info:**']
+  if (ev.available !== undefined) lines.push(`- Available: ${ev.available ? 'Yes' : 'No'}`)
+  if (ev.locations) lines.push(`- Locations: ${ev.locations}`)
+  if (ev.provider) lines.push(`- Provider: ${ev.provider}`)
+  if (ev.notes) lines.push(`- Notes: ${ev.notes}`)
+  return lines.join('\n')
+}
+
+function formatConstruction(data: AirportData): string {
+  const construction = (data as Record<string, unknown>).construction2026 as Record<string, unknown> | undefined
+  if (!construction) return ''
+  const lines: string[] = ['\n**Active Construction (mention for freshness):**']
+  if (construction.status) lines.push(`- Status: ${construction.status}`)
+  if (Array.isArray(construction.projects)) {
+    for (const p of construction.projects) lines.push(`- ${p}`)
+  }
+  if (construction.travelImpact) lines.push(`- Travel impact: ${construction.travelImpact}`)
+  return lines.join('\n')
+}
+
+function formatLounges(data: AirportData): string {
+  if (!data.lounges) return ''
+  const lounges = data.lounges as Record<string, unknown>[]
+  if (!Array.isArray(lounges) || lounges.length === 0) return ''
+  const lines: string[] = ['\n**Airport Lounges:**']
+  for (const l of lounges.slice(0, 5)) {
+    const parts: string[] = []
+    if (l.name) parts.push(`**${l.name}**`)
+    if (l.terminal) parts.push(`${l.terminal}`)
+    if (l.access) parts.push(`${l.access}`)
+    if (l.cost) parts.push(`${l.cost}`)
+    lines.push(`- ${parts.join(' | ')}`)
+  }
+  return lines.join('\n')
+}
+
+function formatAirportData(data: AirportData, keyword?: string): string {
   const terminalList = data.terminals
     .map((t) => `${t.name} (${t.airlines.join(', ')})`)
     .join('; ')
 
-  return `**Verified Airport Facts (USE THESE — do not invent facts not listed here):**
+  const kw = keyword?.toLowerCase() || ''
+
+  // Always include core facts
+  let result = `**Verified Airport Facts (USE THESE — do not invent facts not listed here):**
 - Full name: ${data.fullName}
 - Terminals: ${terminalList}
 - Nearby roads: ${data.roads.join(', ')}
@@ -114,6 +221,22 @@ function formatAirportData(data: AirportData): string {
 
 When citing specific numbers (rates, distances, shuttle frequency), use ONLY the data above. For claims you're unsure about, use hedging language ("typically", "around", "based on current rates").
 ${formatLiveSources(data)}`
+
+  // Always include parking lot details — this is the core value
+  result += formatParkingLots(data, kw)
+  result += formatOnAirportParking(data)
+
+  // Include contextual sections based on keyword relevance
+  if (kw.includes('ev') || kw.includes('electric') || kw.includes('charg')) {
+    result += formatEvCharging(data)
+  }
+  if (kw.includes('lounge') || kw.includes('premium') || kw.includes('ameniti')) {
+    result += formatLounges(data)
+  }
+  // Always include construction for freshness signals
+  result += formatConstruction(data)
+
+  return result
 }
 
 function formatLiveSources(data: AirportData): string {
@@ -164,7 +287,7 @@ ${publishedPosts && publishedPosts.length > 0 ? formatPublishedPosts(publishedPo
 ${getStyleInstructions(item.articleStyle || 'standard', item)}
 ${outlineSection}
 
-${airportData ? formatAirportData(airportData) + '\n\n' : ''}${(() => {
+${airportData ? formatAirportData(airportData, item.keyword) + '\n\n' : ''}${(() => {
     const links = getExternalLinks(item.airportCode, item.articleType)
     return links.length > 0 ? formatExternalLinksForPrompt(links, item.articleType) + '\n' : ''
   })()}${analysis.competitorBenchmarks ? `**Competitor Benchmarks (match or exceed):**
@@ -174,7 +297,7 @@ ${airportData ? formatAirportData(airportData) + '\n\n' : ''}${(() => {
 - Average tables: ${analysis.competitorBenchmarks.avgTableCount}
 - Average links: ${analysis.competitorBenchmarks.avgLinkCount}
 ` : ''}**Topics to cover (from competitor analysis):** ${analysis.commonTopics.join(', ')}
-**Content gaps to fill (unique angles):** ${analysis.gaps.join(', ')}
+**Content gaps to fill (unique angles):** ${analysis.gaps.join(', ')}${analysis.topicGaps?.length ? `\n**Topic gaps (NO competitor covers these — high-value differentiation):** ${analysis.topicGaps.join(', ')}` : ''}${analysis.depthGaps?.length ? `\n**Depth gaps (competitors mention but cover shallowly):** ${analysis.depthGaps.join(', ')}` : ''}${analysis.dataGaps?.length ? `\n**Data gaps (specific missing data points):** ${analysis.dataGaps.join(', ')}` : ''}${analysis.entityFrequency?.length ? `\n**Key entities to mention (by competitor frequency):** ${analysis.entityFrequency.slice(0, 8).map(e => `${e.entity} (${e.mentions}x)`).join(', ')}` : ''}${analysis.structuralPatterns?.length ? `\n**Structural patterns to match:** ${analysis.structuralPatterns.join('; ')}` : ''}
 
 **Writing rules:**
 1. Output ONLY clean HTML using these tags: h2, h3, p, ul, ol, li, a, strong, em, blockquote, table, thead, tbody, tr, th, td

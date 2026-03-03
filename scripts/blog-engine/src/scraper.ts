@@ -5,17 +5,26 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+export interface ScrapedHeading {
+  level: number
+  text: string
+}
+
 export interface ScrapedArticle {
   url: string
   title: string
   content: string
-  headings: string[]
+  headings: ScrapedHeading[]
   wordCount: number
   linkCount: number
   faqCount: number
   tableCount: number
   listCount: number
   h2Count: number
+  schemaTypes: string[]
+  outboundLinks: { href: string; anchor: string }[]
+  imageAlts: string[]
+  ctaPatterns: string[]
 }
 
 export async function searchGoogle(keyword: string, numResults = 5): Promise<string[]> {
@@ -71,20 +80,22 @@ export async function scrapeArticle(url: string): Promise<ScrapedArticle | null>
 
     const title = $('h1').first().text().trim() || $('title').text().trim()
 
-    const headings: string[] = []
-    article.find('h2, h3').each((_, el) => {
+    // Extract headings with hierarchy
+    const headings: ScrapedHeading[] = []
+    article.find('h2, h3, h4').each((_, el) => {
       const text = $(el).text().trim()
-      if (text) headings.push(text)
+      const level = parseInt(el.tagName.replace(/h/i, ''), 10)
+      if (text) headings.push({ level, text })
     })
 
-    // Get text content from paragraphs and lists
+    // Get text content from paragraphs, lists, tables, blockquotes, and definition lists
     const contentParts: string[] = []
-    article.find('p, li').each((_, el) => {
+    article.find('p, li, td, th, blockquote, dt, dd').each((_, el) => {
       const text = $(el).text().trim()
       if (text && text.length > 20) contentParts.push(text)
     })
 
-    const content = contentParts.join('\n\n').slice(0, 10000) // Limit to ~10k chars
+    const content = contentParts.join('\n\n').slice(0, 20000) // Increased to ~20k chars
 
     // Extract structural metadata for competitor benchmarking
     const fullText = article.text()
@@ -103,7 +114,45 @@ export async function scrapeArticle(url: string): Promise<ScrapedArticle | null>
       }
     })
 
-    return { url, title, content, headings, wordCount, linkCount, faqCount, tableCount, listCount, h2Count }
+    // Extract JSON-LD schema types
+    const schemaTypes: string[] = []
+    $('script[type="application/ld+json"]').each((_, el) => {
+      try {
+        const json = JSON.parse($(el).html() || '')
+        const types = Array.isArray(json) ? json.map((j: { '@type'?: string }) => j['@type']) : [json['@type']]
+        for (const t of types) {
+          if (t && !schemaTypes.includes(t)) schemaTypes.push(t)
+        }
+      } catch { /* ignore malformed JSON-LD */ }
+    })
+
+    // Extract first 20 outbound links with anchor text
+    const outboundLinks: { href: string; anchor: string }[] = []
+    article.find('a[href^="http"]').each((_, el) => {
+      if (outboundLinks.length >= 20) return
+      const href = $(el).attr('href') || ''
+      const anchor = $(el).text().trim()
+      if (href && anchor && !href.includes(new URL(url).hostname)) {
+        outboundLinks.push({ href, anchor: anchor.slice(0, 100) })
+      }
+    })
+
+    // Extract image alt texts
+    const imageAlts: string[] = []
+    article.find('img[alt]').each((_, el) => {
+      const alt = $(el).attr('alt')?.trim()
+      if (alt && alt.length > 3) imageAlts.push(alt.slice(0, 100))
+    })
+
+    // Detect CTA patterns
+    const ctaPatterns: string[] = []
+    article.find('a, button').each((_, el) => {
+      const text = $(el).text().trim().toLowerCase()
+      if (/book\s*(now|your|today|parking)/i.test(text)) ctaPatterns.push(text.slice(0, 60))
+      else if (/reserve|compare|check.*availab|find.*parking|get.*quote/i.test(text)) ctaPatterns.push(text.slice(0, 60))
+    })
+
+    return { url, title, content, headings, wordCount, linkCount, faqCount, tableCount, listCount, h2Count, schemaTypes, outboundLinks, imageAlts, ctaPatterns: ctaPatterns.slice(0, 5) }
   } catch (err) {
     console.log(`  ⚠ Error scraping ${url}: ${err instanceof Error ? err.message : err}`)
     return null

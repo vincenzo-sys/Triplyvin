@@ -33,4 +33,10 @@ export const SCRAPE_DELAY_MS = 3000
 export const SCRAPE_TIMEOUT_MS = 15000
 export const DOMAIN = 'triplypro.com'
 export const BLOG_BASE_URL = `https://www.${DOMAIN}/blog`
-export const REVISION_THRESHOLD = 85 // Re-edit if SEO score is below B+ (85/100)
+export const REVISION_THRESHOLD = 85 // Default — overridden by type-aware thresholds below
+export const REVISION_THRESHOLDS: Record<string, number> = {
+  hub: 90,           // Cornerstone content — highest quality bar
+  'sub-pillar': 85,  // Detailed guides — standard quality bar
+  spoke: 80,         // Focused pieces — slightly lower bar
+}
+export const HARD_FLOOR_SCORE = 70 // Below this after all passes → status 'review' (human required)

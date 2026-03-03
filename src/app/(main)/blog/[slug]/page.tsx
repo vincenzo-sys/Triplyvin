@@ -8,6 +8,7 @@ import { ArrowLeft } from 'lucide-react'
 import { Navbar, Footer } from '@/components/shared'
 import { getPostBySlug } from '@/lib/cms'
 import { FaqAccordion } from '@/components/blog/FaqAccordion'
+import { TableOfContents } from '@/components/blog/TableOfContents'
 import { HubLayout } from '@/components/blog/HubLayout'
 import { SubPillarLayout } from '@/components/blog/SubPillarLayout'
 import { SpokeLayout } from '@/components/blog/SpokeLayout'
@@ -54,6 +55,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 async function ArticleContent({ post }: { post: any }) {
   const content = (
     <>
+      <TableOfContents content={post.content} />
       <RichText content={post.content} className="text-gray-700" />
 
       {/* Tags */}
