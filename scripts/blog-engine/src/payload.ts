@@ -140,6 +140,40 @@ export async function getAllPublishedSlugs(airportCode?: string): Promise<Publis
   }))
 }
 
+// Cluster context — fetch hub + sibling article headings for cross-article awareness
+export interface ClusterArticle {
+  slug: string
+  title: string
+  articleType: string
+  headings: { level: number; text: string }[]
+  excerpt: string
+}
+
+export async function getClusterContext(item: { airportCode: string; articleType: string; hubSlug?: string; parentSlug?: string; slug: string }): Promise<ClusterArticle[]> {
+  // Dynamically import to avoid circular deps
+  const { extractHeadingsFromLexical } = await import('./lexical-to-html.js')
+
+  const params = new URLSearchParams({
+    'where[status][equals]': 'published',
+    'where[airportCode][equals]': item.airportCode.toUpperCase(),
+    limit: '20',
+  })
+
+  const result = await payloadFetch(`/posts?${params.toString()}`)
+  const docs = result.docs || []
+
+  return docs
+    .filter((doc: Record<string, unknown>) => doc.slug !== item.slug)
+    .map((doc: Record<string, unknown>) => ({
+      slug: doc.slug as string,
+      title: doc.title as string,
+      articleType: (doc.articleType as string) || 'spoke',
+      headings: extractHeadingsFromLexical(doc.content as Parameters<typeof extractHeadingsFromLexical>[0]),
+      excerpt: ((doc.excerpt as string) || '').slice(0, 200),
+    }))
+    .slice(0, 10)
+}
+
 // Content Queue
 export async function getQueueItems(filters: Record<string, string> = {}) {
   const params = new URLSearchParams({ sort: 'priority' })

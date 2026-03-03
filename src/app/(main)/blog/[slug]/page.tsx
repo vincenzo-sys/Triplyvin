@@ -130,6 +130,39 @@ export default async function BlogPostPage({ params }: Props) {
         }),
       }}
     />
+    {/* BreadcrumbList JSON-LD */}
+    <script
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{
+        __html: JSON.stringify({
+          '@context': 'https://schema.org',
+          '@type': 'BreadcrumbList',
+          itemListElement: [
+            { '@type': 'ListItem', position: 1, name: 'Home', item: 'https://www.triplypro.com' },
+            { '@type': 'ListItem', position: 2, name: 'Blog', item: 'https://www.triplypro.com/blog' },
+            ...(post.category ? [{ '@type': 'ListItem', position: 3, name: post.category.name, item: `https://www.triplypro.com/blog?category=${post.category.slug || ''}` }] : []),
+            { '@type': 'ListItem', position: post.category ? 4 : 3, name: post.title },
+          ],
+        }),
+      }}
+    />
+    {/* FAQPage JSON-LD — trusted CMS content only */}
+    {post.faqItems && post.faqItems.length > 0 && (
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            '@context': 'https://schema.org',
+            '@type': 'FAQPage',
+            mainEntity: post.faqItems.map((faq: { question: string; answer: string }) => ({
+              '@type': 'Question',
+              name: faq.question,
+              acceptedAnswer: { '@type': 'Answer', text: faq.answer },
+            })),
+          }),
+        }}
+      />
+    )}
     <main className="min-h-screen bg-white pt-20">
       {/* Back Link */}
       <div className="bg-gray-50 border-b">

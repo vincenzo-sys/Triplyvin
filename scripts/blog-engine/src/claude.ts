@@ -234,10 +234,11 @@ export async function writeArticle(
   item: QueueItem,
   analysis: AnalysisResult,
   airportData?: AirportData,
-  publishedPosts?: PublishedPost[]
+  publishedPosts?: PublishedPost[],
+  clusterArticles?: { slug: string; title: string; articleType: string; headings: { level: number; text: string }[]; excerpt: string }[]
 ): Promise<WriteResult> {
   console.log('  Step 2/3: Writing article...')
-  const prompt = buildWritePrompt(item, analysis, airportData, publishedPosts)
+  const prompt = buildWritePrompt(item, analysis, airportData, publishedPosts, clusterArticles)
   const systemBlocks: Anthropic.MessageCreateParams['system'] = [
     {
       type: 'text' as const,
@@ -308,7 +309,19 @@ export async function generateArticle(
 
   // Step 2: Write article
   const writeStart = Date.now()
-  const writeResult = await writeArticle(item, analysis, airportData, publishedPosts)
+  // Fetch cluster context for cross-article awareness
+  let clusterArticles: { slug: string; title: string; articleType: string; headings: { level: number; text: string }[]; excerpt: string }[] = []
+  if (item.articleType !== 'hub' && publishedPosts && publishedPosts.length > 0) {
+    try {
+      const { getClusterContext } = await import('./payload.js')
+      clusterArticles = await getClusterContext(item)
+      if (clusterArticles.length > 0) {
+        console.log(`  ✓ Cluster context: ${clusterArticles.length} sibling articles loaded`)
+      }
+    } catch { /* cluster context is optional */ }
+  }
+
+  const writeResult = await writeArticle(item, analysis, airportData, publishedPosts, clusterArticles)
   onStep?.('write', { elapsed: Date.now() - writeStart, result: writeResult as unknown as Record<string, unknown> })
 
   // Build analysis context for the editor

@@ -264,11 +264,42 @@ function formatPublishedPosts(posts: PublishedPost[]): string {
   return lines.join('\n')
 }
 
+interface ClusterArticle {
+  slug: string
+  title: string
+  articleType: string
+  headings: { level: number; text: string }[]
+  excerpt: string
+}
+
+function formatClusterContext(clusterArticles: ClusterArticle[], item: QueueItem): string {
+  if (clusterArticles.length === 0) return ''
+
+  const lines: string[] = ['\n**Cluster Content Context (DO NOT repeat — link instead):**']
+  lines.push(`You are writing a ${item.articleType}. These sibling articles already exist for ${item.airportCode}:`)
+
+  for (const article of clusterArticles) {
+    const h2s = article.headings.filter(h => h.level === 2).map(h => h.text)
+    lines.push(`- "${article.title}" (${article.articleType}) — ${BLOG_BASE_URL}/${article.slug}`)
+    if (h2s.length > 0) {
+      lines.push(`  Covers: ${h2s.join(', ')}`)
+    }
+  }
+
+  lines.push('')
+  lines.push('IMPORTANT: Do NOT repeat content already covered in depth by the hub or siblings above.')
+  lines.push('Instead, reference them with links (e.g., "For a complete overview, see our [guide](url)").')
+  lines.push('Go deeper on YOUR specific angle that siblings do not cover.\n')
+
+  return lines.join('\n')
+}
+
 export function buildWritePrompt(
   item: QueueItem,
   analysis: AnalysisResult,
   airportData?: AirportData,
-  publishedPosts?: PublishedPost[]
+  publishedPosts?: PublishedPost[],
+  clusterArticles?: ClusterArticle[]
 ): string {
   const outlineSection = item.outline?.length
     ? `\n\nFollow this outline:\n${item.outline.map((o) => `${o.order}. ${o.heading}${o.summary ? ` — ${o.summary}` : ''}${o.linksTo ? ` [Link to: ${BLOG_BASE_URL}/${o.linksTo}]` : ''}`).join('\n')}`
@@ -283,7 +314,7 @@ Write an SEO-optimized blog article with the following parameters:
 **Airport:** ${item.airportCode}
 
 ${getArticleTypeInstructions(item)}
-${publishedPosts && publishedPosts.length > 0 ? formatPublishedPosts(publishedPosts) : ''}
+${publishedPosts && publishedPosts.length > 0 ? formatPublishedPosts(publishedPosts) : ''}${clusterArticles && clusterArticles.length > 0 ? formatClusterContext(clusterArticles, item) : ''}
 ${getStyleInstructions(item.articleStyle || 'standard', item)}
 ${outlineSection}
 
