@@ -25,6 +25,8 @@ import { loadAirportData } from './airport-data.js'
 import { scoreArticle, printSeoScore } from './seo-scorer.js'
 import type { SeoScore } from './seo-scorer.js'
 import { lexicalToHtml } from './lexical-to-html.js'
+import { generateTopicalMap, topicalMapToQueueEntries, printTopicalMap, saveTopicalMap } from './topical-map.js'
+import { bootstrapAirport, verifyUrls, saveBootstrapData, printBootstrapSummary } from './bootstrap-airport.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const logsDir = path.resolve(__dirname, '..', 'logs')
@@ -742,6 +744,135 @@ program
         const avg = Math.round(results.reduce((s, r) => s + r.score, 0) / results.length)
         console.log(`\n  Average: ${avg}/100`)
       }
+
+      console.log('')
+    } catch (err) {
+      console.error('Error:', err)
+      process.exit(1)
+    }
+  })
+
+// Plan command — auto-generate a topical map for an airport
+program
+  .command('plan')
+  .description('Generate a topical map (content cluster) for an airport')
+  .requiredOption('-a, --airport <code>', 'Airport code (e.g., EWR)')
+  .option('--import', 'Import generated topics into CMS content queue')
+  .option('--batch <name>', 'Batch name for imported queue items (default: auto-generated)')
+  .action(async (options) => {
+    try {
+      const code = options.airport.toUpperCase()
+      console.log(`\n📋 Triply Blog Engine — Topical Map Planner\n`)
+      console.log(`Airport: ${code}\n`)
+
+      // Generate the topical map
+      const map = await generateTopicalMap(code)
+
+      // Display the map
+      printTopicalMap(map)
+
+      // Save to file
+      const filepath = saveTopicalMap(map)
+      console.log(`\n  📄 Topical map saved: ${filepath}`)
+
+      // Optionally import into CMS queue
+      if (options.import) {
+        const batch = options.batch || `${code.toLowerCase()}-${new Date().toISOString().slice(0, 10)}`
+        const entries = topicalMapToQueueEntries(map, batch)
+
+        console.log(`\n  Importing ${entries.length} items into CMS queue (batch: ${batch})...`)
+
+        let imported = 0
+        let failed = 0
+
+        for (const entry of entries) {
+          try {
+            const res = await fetch(`${env.PAYLOAD_CMS_URL}/api/content-queue`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `users API-Key ${env.PAYLOAD_API_KEY}`,
+              },
+              body: JSON.stringify(entry),
+            })
+
+            if (!res.ok) {
+              const body = await res.text()
+              throw new Error(`${res.status}: ${body}`)
+            }
+
+            imported++
+            console.log(`    ✓ ${entry.articleType.padEnd(11)} | ${entry.suggestedTitle}`)
+          } catch (err) {
+            failed++
+            const msg = err instanceof Error ? err.message : String(err)
+            console.log(`    ✗ ${entry.suggestedTitle}: ${msg}`)
+          }
+        }
+
+        console.log(`\n  Imported: ${imported} | Failed: ${failed}`)
+        if (imported > 0) {
+          console.log(`  Batch: "${batch}" — use \`npm run generate -- -a ${code}\` to start generating`)
+        }
+      } else {
+        console.log(`\n  💡 Add --import to load these topics into the CMS queue`)
+      }
+
+      console.log('')
+    } catch (err) {
+      console.error('Error:', err)
+      process.exit(1)
+    }
+  })
+
+// Bootstrap command — generate airport data JSON
+program
+  .command('bootstrap')
+  .description('Bootstrap a new airport data file using Claude + URL verification')
+  .requiredOption('-a, --airport <code>', 'Airport code (e.g., ORD)')
+  .option('--verify', 'Verify all URLs in the generated data with HTTP HEAD checks')
+  .action(async (options) => {
+    try {
+      const code = options.airport.toUpperCase()
+      console.log(`\n🏗️  Triply Blog Engine — Airport Data Bootstrap\n`)
+      console.log(`Airport: ${code}\n`)
+
+      // Generate base data
+      const data = await bootstrapAirport(code)
+
+      // Print summary
+      printBootstrapSummary(data)
+
+      // Optionally verify URLs
+      if (options.verify) {
+        console.log(`\n  URL Verification:`)
+        const verification = await verifyUrls(data)
+        console.log(`\n  Results: ${verification.valid} valid, ${verification.broken} broken out of ${verification.total} URLs`)
+
+        // Add verification results to the data file
+        ;(data as Record<string, unknown>)._urlVerification = {
+          date: new Date().toISOString().split('T')[0],
+          total: verification.total,
+          valid: verification.valid,
+          broken: verification.broken,
+          brokenUrls: verification.results
+            .filter(r => !r.ok)
+            .map(r => ({ path: r.path, url: r.url, status: r.status })),
+        }
+      }
+
+      // Save the data
+      const filepath = saveBootstrapData(data)
+      console.log(`\n  📄 Airport data saved: ${filepath}`)
+
+      console.log(`\n  💡 Next steps:`)
+      console.log(`  1. Review the generated JSON and fix [UNVERIFIED] values`)
+      console.log(`  2. Replace VERIFY_URL_NEEDED placeholders with real URLs`)
+      if (!options.verify) {
+        console.log(`  3. Run with --verify to check all URLs: npm run bootstrap -- -a ${code} --verify`)
+      }
+      console.log(`  4. Add parkingLots array with off-site lot data`)
+      console.log(`  5. Run npm run plan -- -a ${code} to generate the topical map`)
 
       console.log('')
     } catch (err) {
