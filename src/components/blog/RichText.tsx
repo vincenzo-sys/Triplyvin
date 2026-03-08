@@ -1,6 +1,7 @@
 'use client'
 
 import React from 'react'
+import { ComparisonTable } from './ComparisonTable'
 
 // Lexical node types that Payload uses
 type LexicalNode = {
@@ -23,6 +24,7 @@ type LexicalNode = {
   altText?: string
   width?: number
   height?: number
+  headerState?: number
   relationTo?: string
   value?: {
     url?: string
@@ -44,6 +46,83 @@ const IS_ITALIC = 2
 const IS_STRIKETHROUGH = 4
 const IS_UNDERLINE = 8
 const IS_CODE = 16
+
+// --- Table-encoded bullet list detection ---
+
+/** Recursively collect all leaf text nodes from a node tree (handles CMS paragraph wrapping) */
+function getTextNodes(node: LexicalNode): LexicalNode[] {
+  if (node.type === 'text') return [node]
+  const result: LexicalNode[] = []
+  for (const child of node.children || []) {
+    result.push(...getTextNodes(child))
+  }
+  return result
+}
+
+/** Extract bold header names from a list item (handles merged/trimmed bold nodes) */
+function extractTableHeaders(listItem: LexicalNode): string[] {
+  const headers: string[] = []
+  for (const node of getTextNodes(listItem)) {
+    if (((node.format ?? 0) & IS_BOLD) && node.text) {
+      const trimmed = node.text.trim()
+      if (trimmed.endsWith(':')) {
+        headers.push(trimmed.slice(0, -1).trim())
+      }
+    }
+  }
+  return headers
+}
+
+/** Check if a bullet list matches the table encoding pattern */
+function isTablePattern(node: LexicalNode): boolean {
+  if (node.listType !== 'bullet') return false
+  const items = (node.children || []).filter(c => c.type === 'listitem')
+  if (items.length < 2) return false
+
+  const firstHeaders = extractTableHeaders(items[0])
+  if (firstHeaders.length < 2) return false
+
+  const headerKey = firstHeaders.join('\0')
+  for (let i = 1; i < items.length; i++) {
+    if (extractTableHeaders(items[i]).join('\0') !== headerKey) return false
+  }
+  return true
+}
+
+/** Parse headers and row values from a table-encoded bullet list */
+function parseTableData(node: LexicalNode): { headers: string[]; rows: string[][] } {
+  const items = (node.children || []).filter(c => c.type === 'listitem')
+  const headers = extractTableHeaders(items[0])
+
+  const rows: string[][] = []
+  for (const item of items) {
+    const values: string[] = []
+    let currentValue = ''
+    let collecting = false
+
+    for (const child of getTextNodes(item)) {
+      const isBold = ((child.format ?? 0) & IS_BOLD) !== 0
+      const text = child.text || ''
+
+      if (isBold && text.trim().endsWith(':')) {
+        // Bold header label — push any collected value and start new cell
+        if (collecting) {
+          values.push(currentValue.replace(/^[\s|]+/, '').replace(/[\s|]+$/, '').trim())
+        }
+        currentValue = ''
+        collecting = true
+      } else if (collecting) {
+        currentValue += text
+      }
+    }
+    if (collecting) {
+      values.push(currentValue.replace(/^[\s|]+/, '').replace(/[\s|]+$/, '').trim())
+    }
+    rows.push(values)
+  }
+
+  return { headers, rows }
+}
 
 function extractText(node: LexicalNode): string {
   if (node.text) return node.text
@@ -113,6 +192,10 @@ function renderNode(node: LexicalNode, index: number): React.ReactNode {
     }
 
     case 'list':
+      if (node.listType === 'bullet' && isTablePattern(node)) {
+        const { headers, rows } = parseTableData(node)
+        return <ComparisonTable key={key} headers={headers} rows={rows} />
+      }
       if (node.listType === 'number') {
         return (
           <ol key={key} className="list-decimal list-inside mb-4 space-y-1">
@@ -202,7 +285,8 @@ function renderNode(node: LexicalNode, index: number): React.ReactNode {
     case 'horizontalrule':
       return <hr key={key} className="my-8 border-gray-200" />
 
-    case 'table':
+    case 'table': {
+      // Legacy format: raw HTML string (trusted CMS content, not user-generated)
       if (node.html) {
         return (
           <div
@@ -217,7 +301,144 @@ function renderNode(node: LexicalNode, index: number): React.ReactNode {
           />
         )
       }
-      return null
+
+      // Native Lexical table — styled with responsive desktop table + mobile cards
+      const allRows = (node.children || []).filter(c => c.type === 'tablerow')
+      const headerRowIdx = allRows.findIndex(r =>
+        r.children?.some(c => c.headerState === 1)
+      )
+      const headerRow = headerRowIdx >= 0 ? allRows[headerRowIdx] : null
+      const dataRows = allRows.filter((_, i) => i !== headerRowIdx)
+      const headerCells = headerRow?.children?.filter(c => c.type === 'tablecell') || []
+      const headerLabels = headerCells.map(c => extractText(c))
+
+      // Render cell content without the wrapping <p> margins
+      const renderCellContent = (cell: LexicalNode): React.ReactNode => {
+        const children = cell.children || []
+        if (children.length === 1 && children[0].type === 'paragraph') {
+          return children[0].children?.map((child, i) => renderNode(child, i))
+        }
+        return children.map((child, i) => renderNode(child, i))
+      }
+
+      const isPriceValue = (text: string) => /\$/.test(text)
+
+      return (
+        <div key={key} className="my-6">
+          {/* Desktop: horizontal scroll table with sticky first column */}
+          <div className="hidden md:block -mx-4 sm:mx-0">
+            <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
+              <table className="w-full text-sm border-collapse">
+                {headerRow && (
+                  <thead>
+                    <tr>
+                      {headerCells.map((cell, ci) => (
+                        <th
+                          key={ci}
+                          className={`bg-navy text-xs font-semibold uppercase tracking-wider text-white px-4 py-3 text-left whitespace-nowrap${
+                            ci === 0 ? ' sticky left-0 z-10 bg-navy' : ''
+                          }`}
+                        >
+                          {renderCellContent(cell)}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                )}
+                <tbody>
+                  {dataRows.map((row, ri) => {
+                    const cells = (row.children || []).filter(c => c.type === 'tablecell')
+                    const stripeBg = ri % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
+                    return (
+                      <tr key={ri} className={`group ${stripeBg} hover:bg-coral/5 transition-colors`}>
+                        {cells.map((cell, ci) => {
+                          const cellText = extractText(cell)
+                          const stickyClasses =
+                            ci === 0
+                              ? `sticky left-0 z-10 font-medium ${stripeBg} group-hover:bg-coral/5 transition-colors`
+                              : ''
+                          return (
+                            <td
+                              key={ci}
+                              className={`px-4 py-3 border-b border-gray-100 ${stickyClasses}${
+                                isPriceValue(cellText) ? ' text-emerald-700 font-mono font-semibold' : ''
+                              }`}
+                            >
+                              {renderCellContent(cell)}
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Mobile: card stack */}
+          <div className="md:hidden space-y-3">
+            {dataRows.map((row, ri) => {
+              const cells = (row.children || []).filter(c => c.type === 'tablecell')
+              return (
+                <div
+                  key={ri}
+                  className="border border-gray-200 overflow-hidden rounded-xl shadow-sm"
+                >
+                  <div className="bg-navy text-white font-semibold text-base px-4 py-2.5">
+                    {cells[0] ? renderCellContent(cells[0]) : '\u2014'}
+                  </div>
+                  <div className="px-4 py-3 space-y-2">
+                    {cells.slice(1).map((cell, ci) => {
+                      const cellText = extractText(cell)
+                      return (
+                        <div key={ci} className="flex justify-between items-baseline">
+                          <span className="text-xs text-gray-500">{headerLabels[ci + 1] || ''}</span>
+                          <span
+                            className={`text-sm text-right${
+                              isPriceValue(cellText) ? ' text-emerald-700 font-mono font-semibold' : ''
+                            }`}
+                          >
+                            {renderCellContent(cell)}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )
+    }
+
+    case 'tablerow':
+      return (
+        <tr key={key}>
+          {node.children?.map((child, i) => renderNode(child, i))}
+        </tr>
+      )
+
+    case 'tablecell': {
+      // Standalone tablecell rendering (fallback when table doesn't handle layout directly)
+      const isHeader = node.headerState === 1
+      const cellClass = isHeader
+        ? 'bg-navy text-xs font-semibold uppercase tracking-wider text-white px-4 py-3 text-left whitespace-nowrap'
+        : 'px-4 py-3 border-b border-gray-100'
+      if (isHeader) {
+        return (
+          <th key={key} className={cellClass}>
+            {node.children?.map((child, i) => renderNode(child, i))}
+          </th>
+        )
+      }
+      return (
+        <td key={key} className={cellClass}>
+          {node.children?.map((child, i) => renderNode(child, i))}
+        </td>
+      )
+    }
 
     default:
       // For unknown nodes, try to render children

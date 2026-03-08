@@ -39,6 +39,7 @@ interface AnalysisResult {
 }
 
 interface WriteResult {
+  title: string
   html: string
   excerpt: string
   metaTitle: string
@@ -86,6 +87,7 @@ function truncateAtWord(text: string, max: number): string {
 }
 
 const WriteResultSchema = z.object({
+  title: z.string().transform(s => truncateAtWord(s, 80)),
   html: z.string(),
   excerpt: z.string(),
   metaTitle: z.string().transform(s => truncateAtWord(s, 60)),
@@ -123,10 +125,120 @@ function extractJsonString(text: string): string {
   return jsonStr
 }
 
+/**
+ * Walk through a JSON string and escape unescaped double quotes inside string values.
+ *
+ * Works by scanning character-by-character. When we're inside a JSON string value
+ * (after `"key": "`), we check each `"` to see if it's a structural boundary
+ * (followed by `,` `}` `]` `:` or end-of-string) or a literal quote that needs escaping.
+ */
+function repairUnescapedQuotes(json: string): string {
+  const chars = json.split('')
+  let inString = false
+  let isValueString = false
+  let i = 0
+
+  // Track whether the last key-colon pair means the next string is a value
+  let afterColon = false
+
+  while (i < chars.length) {
+    const ch = chars[i]
+
+    if (!inString) {
+      if (ch === '"') {
+        inString = true
+        isValueString = afterColon
+        afterColon = false
+      } else if (ch === ':') {
+        afterColon = true
+      } else if (ch === ',' || ch === '{' || ch === '[') {
+        afterColon = false
+      }
+      i++
+      continue
+    }
+
+    // We're inside a string
+    if (ch === '\\') {
+      i += 2 // skip escaped char
+      continue
+    }
+
+    if (ch === '"') {
+      // Is this the closing quote of the string?
+      const rest = json.slice(i + 1, i + 60).trimStart()
+      const isStructural =
+        rest.length === 0 ||
+        rest[0] === ',' ||
+        rest[0] === '}' ||
+        rest[0] === ']' ||
+        rest[0] === ':'
+
+      if (isStructural) {
+        // This is a real closing quote
+        inString = false
+        i++
+        continue
+      }
+
+      // This is an unescaped quote inside a value — escape it
+      if (isValueString) {
+        chars.splice(i, 0, '\\')
+        i += 2
+        // Rebuild json from chars for future slice() calls
+        json = chars.join('')
+        continue
+      }
+
+      // Inside a key string — unlikely to have unescaped quotes but handle gracefully
+      inString = false
+      i++
+      continue
+    }
+
+    i++
+  }
+
+  return chars.join('')
+}
+
 function parseJsonResponse<T>(text: string, schema: z.ZodType<T>): T {
   const jsonStr = extractJsonString(text)
-  const raw = JSON.parse(jsonStr)
-  return schema.parse(raw)
+  try {
+    const raw = JSON.parse(jsonStr)
+    return schema.parse(raw)
+  } catch (firstErr) {
+    // Repair step 1: Replace literal control characters (U+0000–U+001F)
+    let repaired = jsonStr.replace(/[\x00-\x1f]/g, (ch) => {
+      switch (ch) {
+        case '\n': return '\\n'
+        case '\r': return '\\r'
+        case '\t': return '\\t'
+        default: return ''
+      }
+    })
+
+    // Repair step 2: Fix unescaped double quotes inside ALL JSON string values.
+    // Claude often outputs HTML with literal "quotes" inside JSON strings.
+    // Strategy: walk through the JSON, find each `"key": "value"` pair,
+    // and escape any unescaped quotes inside the value that aren't structural boundaries.
+    repaired = repairUnescapedQuotes(repaired)
+
+    try {
+      const raw = JSON.parse(repaired)
+      return schema.parse(raw)
+    } catch (repairErr) {
+      // Log context around the error position for debugging (use repaired string)
+      const errMsg = (repairErr as Error).message
+      const errMatch = errMsg.match(/position (\d+)/)
+      if (errMatch) {
+        const errPos = parseInt(errMatch[1])
+        console.log(`  [JSON Debug] Repair failed at position ${errPos}:`)
+        console.log(`  ...${repaired.slice(Math.max(0, errPos - 80), errPos)}<<<HERE>>>${repaired.slice(errPos, errPos + 80)}...`)
+      }
+      throw repairErr
+    }
+  }
 }
 
 type SystemMessage = string | Anthropic.MessageCreateParams['system']
@@ -286,6 +398,7 @@ export async function generateArticle(
   airportData?: AirportData,
   publishedPosts?: PublishedPost[]
 ): Promise<{
+  title: string
   html: string
   excerpt: string
   metaTitle: string
@@ -428,6 +541,7 @@ export async function generateArticle(
   }
 
   return {
+    title: writeResult.title,
     html: editResult.html,
     excerpt: writeResult.excerpt,
     metaTitle: writeResult.metaTitle,

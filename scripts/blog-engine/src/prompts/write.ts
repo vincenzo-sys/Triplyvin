@@ -114,7 +114,7 @@ function formatParkingLots(data: AirportData, keyword: string): string {
 
   if (lots.length === 0) return ''
 
-  const lines: string[] = ['\n**Off-Site Parking Lots (sorted by price — cite specific lots and rates):**']
+  const lines: string[] = ['\n**Off-Site Parking Lots (sorted by price — use these EXACT names and rates in tables and text, NEVER generalize into categories):**']
   for (const lot of lots) {
     const l = lot as Record<string, unknown>
     let line = `- **${l.name}**: $${l.dailyRate}/day`
@@ -309,9 +309,15 @@ export function buildWritePrompt(
 
 Write an SEO-optimized blog article with the following parameters:
 
-**Title:** ${item.suggestedTitle}
 **Target keyword:** ${item.keyword}
 **Airport:** ${item.airportCode}
+
+**Generate an article title** (50-65 characters) that:
+- Places the target keyword near the front
+- Is compelling and specific (not generic)
+- Omits the year unless content is genuinely time-sensitive
+- Hub = authoritative guide title; Sub-pillar = deep-dive title; Spoke = specific answer title
+${item.suggestedTitle ? `**Title guidance (optional angle):** ${item.suggestedTitle}` : ''}
 
 ${getArticleTypeInstructions(item)}
 ${publishedPosts && publishedPosts.length > 0 ? formatPublishedPosts(publishedPosts) : ''}${clusterArticles && clusterArticles.length > 0 ? formatClusterContext(clusterArticles, item) : ''}
@@ -331,8 +337,8 @@ ${airportData ? formatAirportData(airportData, item.keyword) + '\n\n' : ''}${(()
 **Content gaps to fill (unique angles):** ${analysis.gaps.join(', ')}${analysis.topicGaps?.length ? `\n**Topic gaps (NO competitor covers these — high-value differentiation):** ${analysis.topicGaps.join(', ')}` : ''}${analysis.depthGaps?.length ? `\n**Depth gaps (competitors mention but cover shallowly):** ${analysis.depthGaps.join(', ')}` : ''}${analysis.dataGaps?.length ? `\n**Data gaps (specific missing data points):** ${analysis.dataGaps.join(', ')}` : ''}${analysis.entityFrequency?.length ? `\n**Key entities to mention (by competitor frequency):** ${analysis.entityFrequency.slice(0, 8).map(e => `${e.entity} (${e.mentions}x)`).join(', ')}` : ''}${analysis.structuralPatterns?.length ? `\n**Structural patterns to match:** ${analysis.structuralPatterns.join('; ')}` : ''}
 
 **Writing rules:**
-1. Output ONLY clean HTML using these tags: h2, h3, p, ul, ol, li, a, strong, em, blockquote, table, thead, tbody, tr, th, td
-2. Do NOT use: h1, div, span, img, inline styles, classes, or IDs
+1. Output ONLY clean HTML using these tags: h2, h3, p, ul, ol, li, a, strong, em, blockquote, table, thead, tbody, tr, th, td, img
+2. Do NOT use: h1, div, span, inline styles, classes, or IDs
 3. Do NOT include the article title as an h1 — it's handled separately
 4. All internal links use format: ${BLOG_BASE_URL}/[slug]
 5. External links: USE the verified external links database and liveSources URLs provided above. Pick the most relevant links for this topic. Add rel="nofollow" where specified. Use the suggested anchor text (vary it naturally). Do NOT invent external URLs — ONLY use URLs from the databases provided above.
@@ -373,15 +379,15 @@ GOOD: "The economy lot is the cheapest option at $18/day. It's a 10-minute shutt
 27. FRESHNESS SIGNALS: For things that genuinely change (rates, policies, construction updates), include timeframe references like "as of 2026" or "current rates". Don't add year references to evergreen facts that don't change — it just dates the content unnecessarily.
 28. PARAGRAPH LENGTH: Keep paragraphs to 3-5 sentences (80-120 words). Long enough to develop a point, short enough for AI to parse and extract. Never exceed 5 sentences in a single paragraph.
 29. NO FILLER: Every sentence must contain a fact, a tip, or a specific actionable detail. Remove any sentence that exists just to fill space or transition generically.
-30. COMPARISON TABLES: For pricing data and side-by-side comparisons, use HTML tables (<table>, <thead>, <tbody>, <tr>, <th>, <td>). Tables are especially valuable in data-heavy and comparison style articles. Include at least one table when comparing parking options, rates, or features across providers.
+30. COMPARISON TABLES: For pricing data and side-by-side comparisons, use HTML tables (<table>, <thead>, <tbody>, <tr>, <th>, <td>). Tables are especially valuable in data-heavy and comparison style articles. Include at least one table when comparing parking options, rates, or features across providers. CRITICAL: Every row in a parking comparison table MUST use an ACTUAL named facility from the verified data above (e.g., "PARK AC", "ARB Parking", "Bolt Parking"). NEVER use generic categories like "Budget (Jamaica)" or "Premium (Near terminals)" — readers need real lot names they can search for and book.
 31. VERIFICATION DATES: When citing promo codes, specific rates, or time-sensitive facts, add "(verified [Month Year])" inline — e.g., "The early bird rate is $18/day (verified February 2026)." This builds trust and signals freshness.
 32. PAA TARGETS: Include 2-3 "People Also Ask" style questions as H2 or H3 headings, targeting common related queries that searchers ask about this topic. For example, if writing about JFK parking deals, include headings like "Is There Free Parking at JFK?" or "How Early Should I Book JFK Parking?"
-
 Respond with ONLY valid JSON in this exact format:
 {
+  "title": "Display title for the article (50-65 chars, keyword-rich, compelling)",
   "html": "<h2>First Section</h2><p>Content...</p>...",
   "excerpt": "A brief 1-2 sentence summary for SEO (max 300 chars)",
-  "metaTitle": "SEO title (max 60 chars)",
+  "metaTitle": "SEO title (max 60 chars, shorter variant of title)",
   "metaDescription": "SEO description (max 160 chars)",
   "earlyCta": "The exact text of your early CTA (e.g., 'Compare Terminal 4 parking rates on Triply')",
   "closingCta": "The exact text of your closing CTA (e.g., 'Reserve your JFK parking spot and save up to 60%')",

@@ -61,7 +61,9 @@ export async function uploadMedia(file: Buffer, filename: string, alt: string) {
   const mimeType = mimeTypes[ext] || 'image/jpeg'
 
   const formData = new FormData()
-  formData.append('file', new Blob([new Uint8Array(file)], { type: mimeType }), filename)
+  // Use File (not Blob) so the Vercel Blob storage adapter gets proper filename/type metadata
+  const fileObj = new File([new Uint8Array(file)], filename, { type: mimeType })
+  formData.append('file', fileObj)
   formData.append('_payload', JSON.stringify({ alt: alt || 'Airport parking' }))
 
   const url = `${env.PAYLOAD_CMS_URL}/api/media`

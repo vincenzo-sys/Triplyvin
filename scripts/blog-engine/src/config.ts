@@ -27,7 +27,7 @@ if (!parsed.success) {
 export const env = parsed.data
 
 // Constants
-export const CLAUDE_MODEL = 'claude-sonnet-4-6-20250827'
+export const CLAUDE_MODEL = 'claude-sonnet-4-6'
 export const MAX_TOKENS = 16384
 export const SCRAPE_DELAY_MS = 3000
 export const SCRAPE_TIMEOUT_MS = 15000

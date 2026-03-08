@@ -1,0 +1,1143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Triply Blog Engine — Architecture & Prompts</title>
+  <style>
+    :root {
+      --navy: #1a2b4a;
+      --coral: #ff6b6b;
+      --coral-light: #fff0f0;
+      --gray-50: #f9fafb;
+      --gray-100: #f3f4f6;
+      --gray-200: #e5e7eb;
+      --gray-300: #d1d5db;
+      --gray-500: #6b7280;
+      --gray-700: #374151;
+      --gray-900: #111827;
+      --green: #10b981;
+      --green-light: #ecfdf5;
+      --blue: #3b82f6;
+      --blue-light: #eff6ff;
+      --amber: #f59e0b;
+      --amber-light: #fffbeb;
+      --purple: #8b5cf6;
+      --purple-light: #f5f3ff;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      color: var(--gray-900);
+      line-height: 1.6;
+      background: var(--gray-50);
+    }
+
+    /* Header */
+    .header {
+      background: var(--navy);
+      color: white;
+      padding: 3rem 2rem;
+      text-align: center;
+    }
+    .header h1 {
+      font-size: 2.5rem;
+      margin-bottom: 0.5rem;
+      letter-spacing: -0.02em;
+    }
+    .header p {
+      color: rgba(255,255,255,0.7);
+      font-size: 1.1rem;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    .header .badge {
+      display: inline-block;
+      background: var(--coral);
+      color: white;
+      padding: 0.25rem 0.75rem;
+      border-radius: 100px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+    }
+
+    /* Nav */
+    .nav {
+      background: white;
+      border-bottom: 1px solid var(--gray-200);
+      padding: 0.75rem 2rem;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .nav a {
+      color: var(--gray-700);
+      text-decoration: none;
+      padding: 0.4rem 0.8rem;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    .nav a:hover { background: var(--gray-100); color: var(--navy); }
+
+    /* Main content */
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+
+    section {
+      margin-bottom: 3rem;
+    }
+
+    h2 {
+      font-size: 1.8rem;
+      color: var(--navy);
+      margin-bottom: 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 2px solid var(--coral);
+      letter-spacing: -0.01em;
+    }
+
+    h3 {
+      font-size: 1.25rem;
+      color: var(--gray-900);
+      margin: 1.5rem 0 0.75rem;
+    }
+
+    h4 {
+      font-size: 1rem;
+      color: var(--gray-700);
+      margin: 1rem 0 0.5rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-size: 0.8rem;
+    }
+
+    p { margin-bottom: 0.75rem; color: var(--gray-700); }
+
+    /* Pipeline diagram */
+    .pipeline {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      overflow-x: auto;
+      padding: 2rem 0;
+    }
+    .pipeline-step {
+      flex-shrink: 0;
+      text-align: center;
+      padding: 1rem 1.25rem;
+      border-radius: 12px;
+      min-width: 130px;
+      position: relative;
+    }
+    .pipeline-step .icon { font-size: 1.8rem; margin-bottom: 0.4rem; }
+    .pipeline-step .label { font-weight: 600; font-size: 0.85rem; }
+    .pipeline-step .sub { font-size: 0.72rem; color: var(--gray-500); margin-top: 0.2rem; }
+    .pipeline-arrow {
+      flex-shrink: 0;
+      font-size: 1.5rem;
+      color: var(--gray-300);
+      margin: 0 0.25rem;
+    }
+    .step-scrape { background: var(--blue-light); border: 1px solid #bfdbfe; }
+    .step-ai { background: var(--purple-light); border: 1px solid #ddd6fe; }
+    .step-score { background: var(--amber-light); border: 1px solid #fde68a; }
+    .step-publish { background: var(--green-light); border: 1px solid #a7f3d0; }
+    .step-queue { background: var(--gray-100); border: 1px solid var(--gray-200); }
+
+    /* Cards */
+    .card {
+      background: white;
+      border: 1px solid var(--gray-200);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1rem;
+    }
+    .card h3 {
+      margin-top: 0;
+      font-size: 1.1rem;
+    }
+    .card.highlight {
+      border-left: 4px solid var(--coral);
+    }
+    .card.blue { border-left: 4px solid var(--blue); }
+    .card.green { border-left: 4px solid var(--green); }
+    .card.purple { border-left: 4px solid var(--purple); }
+    .card.amber { border-left: 4px solid var(--amber); }
+
+    /* Code blocks */
+    pre {
+      background: var(--gray-900);
+      color: #e5e7eb;
+      padding: 1.25rem;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-size: 0.82rem;
+      line-height: 1.5;
+      margin: 0.75rem 0;
+    }
+    code {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+    }
+    p code, li code {
+      background: var(--gray-100);
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.85em;
+      color: var(--coral);
+    }
+
+    /* Grid */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+    @media (max-width: 768px) {
+      .grid-2 { grid-template-columns: 1fr; }
+    }
+
+    /* Tables */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+      font-size: 0.85rem;
+    }
+    th {
+      background: var(--gray-100);
+      text-align: left;
+      padding: 0.6rem 0.8rem;
+      font-weight: 600;
+      border-bottom: 2px solid var(--gray-200);
+    }
+    td {
+      padding: 0.5rem 0.8rem;
+      border-bottom: 1px solid var(--gray-200);
+      color: var(--gray-700);
+    }
+    tr:hover td { background: var(--gray-50); }
+
+    /* Tags */
+    .tag {
+      display: inline-block;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .tag-hub { background: #dbeafe; color: #1d4ed8; }
+    .tag-sub { background: #fce7f3; color: #be185d; }
+    .tag-spoke { background: #e0e7ff; color: #4338ca; }
+    .tag-ai { background: var(--purple-light); color: #7c3aed; }
+    .tag-file { background: var(--gray-100); color: var(--gray-700); }
+
+    /* Rule list */
+    .rule-list { list-style: none; padding: 0; }
+    .rule-list li {
+      padding: 0.6rem 0;
+      border-bottom: 1px solid var(--gray-100);
+      color: var(--gray-700);
+      font-size: 0.9rem;
+    }
+    .rule-list li:last-child { border-bottom: none; }
+    .rule-num {
+      display: inline-block;
+      background: var(--coral);
+      color: white;
+      width: 1.6rem;
+      height: 1.6rem;
+      text-align: center;
+      line-height: 1.6rem;
+      border-radius: 50%;
+      font-size: 0.7rem;
+      font-weight: 700;
+      margin-right: 0.5rem;
+      flex-shrink: 0;
+    }
+    .rule-num.blue-num { background: var(--blue); }
+    .rule-num.green-num { background: var(--green); }
+    .rule-num.purple-num { background: var(--purple); }
+    .rule-num.amber-num { background: var(--amber); }
+
+    /* Score ring */
+    .score-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1rem;
+      margin: 1rem 0;
+    }
+    @media (max-width: 768px) {
+      .score-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    .score-card {
+      background: white;
+      border: 1px solid var(--gray-200);
+      border-radius: 10px;
+      padding: 1.25rem;
+      text-align: center;
+    }
+    .score-card .pts {
+      font-size: 2rem;
+      font-weight: 800;
+      color: var(--navy);
+    }
+    .score-card .pts span {
+      font-size: 0.9rem;
+      color: var(--gray-500);
+      font-weight: 400;
+    }
+    .score-card .label {
+      font-size: 0.8rem;
+      color: var(--gray-500);
+      margin-top: 0.25rem;
+    }
+
+    /* Flowchart */
+    .flow-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin: 0.5rem 0;
+    }
+    .flow-box {
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 500;
+    }
+    .flow-arrow { color: var(--gray-300); font-weight: bold; }
+
+    /* Hierarchy */
+    .hierarchy {
+      padding-left: 1.5rem;
+    }
+    .hierarchy .level {
+      position: relative;
+      padding: 0.5rem 0 0.5rem 1.5rem;
+      border-left: 2px solid var(--gray-200);
+    }
+    .hierarchy .level::before {
+      content: '';
+      position: absolute;
+      left: -1px;
+      top: 1.1rem;
+      width: 1rem;
+      height: 2px;
+      background: var(--gray-200);
+    }
+    .hierarchy .level .dot {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-right: 0.5rem;
+      vertical-align: middle;
+    }
+
+    /* File tree */
+    .file-tree {
+      font-family: 'SF Mono', monospace;
+      font-size: 0.82rem;
+      background: white;
+      border: 1px solid var(--gray-200);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      line-height: 1.8;
+    }
+    .file-tree .folder { color: var(--blue); font-weight: 600; }
+    .file-tree .file { color: var(--gray-700); }
+    .file-tree .comment { color: var(--gray-500); font-style: italic; }
+
+    .callout {
+      background: var(--amber-light);
+      border: 1px solid #fde68a;
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin: 1rem 0;
+      font-size: 0.9rem;
+    }
+    .callout strong { color: var(--gray-900); }
+
+    ul, ol { padding-left: 1.5rem; margin: 0.5rem 0; color: var(--gray-700); }
+    li { margin: 0.3rem 0; font-size: 0.9rem; }
+
+    .footer {
+      text-align: center;
+      padding: 2rem;
+      color: var(--gray-500);
+      font-size: 0.8rem;
+      border-top: 1px solid var(--gray-200);
+      margin-top: 2rem;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div class="badge">INTERNAL DOCS</div>
+  <h1>Triply Blog Engine</h1>
+  <p>AI-powered content pipeline for generating, editing, scoring, and publishing SEO-optimized airport parking articles.</p>
+</div>
+
+<!-- Navigation -->
+<nav class="nav">
+  <a href="#overview">Overview</a>
+  <a href="#pipeline">Pipeline</a>
+  <a href="#content-model">Content Model</a>
+  <a href="#queue">Queue System</a>
+  <a href="#step-scrape">Step 1: Scrape</a>
+  <a href="#step-analyze">Step 2: Analyze</a>
+  <a href="#step-write">Step 3: Write</a>
+  <a href="#step-edit">Step 4: Edit</a>
+  <a href="#scoring">SEO Scoring</a>
+  <a href="#data">Data Sources</a>
+  <a href="#cms">CMS Publishing</a>
+  <a href="#files">File Reference</a>
+  <a href="#commands">CLI Commands</a>
+</nav>
+
+<div class="container">
+
+  <!-- Overview -->
+  <section id="overview">
+    <h2>Overview</h2>
+    <p>The blog engine is a standalone Node.js CLI tool that generates airport parking articles using a multi-step AI pipeline. It scrapes competitor content, generates articles with Claude, quality-checks them, scores SEO, and publishes to Payload CMS.</p>
+
+    <div class="grid-2">
+      <div class="card">
+        <h3>Tech Stack</h3>
+        <table>
+          <tr><td><strong>Runtime</strong></td><td>Node.js + TypeScript</td></tr>
+          <tr><td><strong>AI Model</strong></td><td>Claude Sonnet 4.5</td></tr>
+          <tr><td><strong>CMS</strong></td><td>Payload CMS (REST API)</td></tr>
+          <tr><td><strong>Scraping</strong></td><td>SerpAPI + Cheerio</td></tr>
+          <tr><td><strong>Images</strong></td><td>Unsplash API</td></tr>
+          <tr><td><strong>Max Tokens</strong></td><td>16,384 per API call</td></tr>
+        </table>
+      </div>
+      <div class="card">
+        <h3>Key Stats</h3>
+        <table>
+          <tr><td><strong>AI Steps</strong></td><td>3 (Analyze, Write, Edit)</td></tr>
+          <tr><td><strong>SEO Rubric</strong></td><td>100 points across 4 categories</td></tr>
+          <tr><td><strong>Article Styles</strong></td><td>5 (standard, narrative, listicle, data-heavy, comparison)</td></tr>
+          <tr><td><strong>Content Tiers</strong></td><td>3 (Hub, Sub-Pillar, Spoke)</td></tr>
+          <tr><td><strong>Write Rules</strong></td><td>32 prompt rules</td></tr>
+          <tr><td><strong>Edit Checks</strong></td><td>21 quality checks</td></tr>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pipeline -->
+  <section id="pipeline">
+    <h2>Pipeline Flow</h2>
+    <p>Each article goes through this full pipeline, from queue to published draft:</p>
+
+    <div class="pipeline">
+      <div class="pipeline-step step-queue">
+        <div class="icon">📋</div>
+        <div class="label">Queue</div>
+        <div class="sub">Fetch next item</div>
+      </div>
+      <div class="pipeline-arrow">&rarr;</div>
+      <div class="pipeline-step step-scrape">
+        <div class="icon">🔍</div>
+        <div class="label">Scrape</div>
+        <div class="sub">Competitor research</div>
+      </div>
+      <div class="pipeline-arrow">&rarr;</div>
+      <div class="pipeline-step step-ai">
+        <div class="icon">🧠</div>
+        <div class="label">Analyze</div>
+        <div class="sub">AI: gaps &amp; topics</div>
+      </div>
+      <div class="pipeline-arrow">&rarr;</div>
+      <div class="pipeline-step step-ai">
+        <div class="icon">✍️</div>
+        <div class="label">Write</div>
+        <div class="sub">AI: full article</div>
+      </div>
+      <div class="pipeline-arrow">&rarr;</div>
+      <div class="pipeline-step step-ai">
+        <div class="icon">🔧</div>
+        <div class="label">Edit</div>
+        <div class="sub">AI: quality pass</div>
+      </div>
+      <div class="pipeline-arrow">&rarr;</div>
+      <div class="pipeline-step step-score">
+        <div class="icon">📊</div>
+        <div class="label">Score</div>
+        <div class="sub">100-pt SEO rubric</div>
+      </div>
+      <div class="pipeline-arrow">&rarr;</div>
+      <div class="pipeline-step step-publish">
+        <div class="icon">🚀</div>
+        <div class="label">Publish</div>
+        <div class="sub">CMS draft</div>
+      </div>
+    </div>
+
+    <div class="callout">
+      <strong>Prerequisites enforced:</strong> Sub-pillars can only generate after their hub is published. Spokes can only generate after their parent sub-pillar is published. This ensures internal linking always points to live pages.
+    </div>
+  </section>
+
+  <!-- Content Model -->
+  <section id="content-model">
+    <h2>Content Model</h2>
+    <p>Articles follow a 3-tier hierarchy for topical authority and internal linking:</p>
+
+    <div class="grid-2">
+      <div>
+        <div class="card blue">
+          <h3><span class="tag tag-hub">HUB</span> Pillar Page</h3>
+          <p><strong>Example:</strong> "The Complete Guide to JFK Airport Parking"</p>
+          <ul>
+            <li>2,000 &ndash; 2,500 words</li>
+            <li>Comprehensive overview of ALL parking aspects</li>
+            <li>Each H2 briefly introduces a subtopic</li>
+            <li>Links out to every sub-pillar article</li>
+            <li>The definitive, authoritative page for the airport</li>
+          </ul>
+        </div>
+
+        <div class="card" style="border-left: 4px solid #be185d;">
+          <h3><span class="tag tag-sub">SUB-PILLAR</span> Detailed Guide</h3>
+          <p><strong>Example:</strong> "JFK Long-Term Parking: Rates, Tips & Best Lots"</p>
+          <ul>
+            <li>1,500 &ndash; 2,000 words</li>
+            <li>Deep dive on one specific aspect</li>
+            <li>Links back to hub + cross-links to sibling sub-pillars</li>
+            <li>More detail than the hub provides</li>
+          </ul>
+        </div>
+
+        <div class="card purple">
+          <h3><span class="tag tag-spoke">SPOKE</span> Focused Piece</h3>
+          <p><strong>Example:</strong> "Is JFK Cell Phone Lot Free?"</p>
+          <ul>
+            <li>800 &ndash; 1,200 words</li>
+            <li>Answers one specific question or niche topic</li>
+            <li>Links to parent sub-pillar + hub</li>
+            <li>Targets long-tail keywords</li>
+          </ul>
+        </div>
+      </div>
+
+      <div>
+        <h3>Article Styles</h3>
+        <p>Each article is assigned one of 5 styles that control the AI's writing approach:</p>
+
+        <div class="card">
+          <table>
+            <thead>
+              <tr><th>Style</th><th>Opening</th><th>Structure</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Standard</strong></td>
+                <td>Direct answer + Key Takeaways</td>
+                <td>Question H2s, balanced prose/lists</td>
+              </tr>
+              <tr>
+                <td><strong>Narrative</strong></td>
+                <td>Traveler scenario (2-3 sentences)</td>
+                <td>Flowing prose, minimal lists, NO Key Takeaways</td>
+              </tr>
+              <tr>
+                <td><strong>Listicle</strong></td>
+                <td>Numbered hook ("7 things...")</td>
+                <td>Numbered H2s: "1. Topic", "2. Topic"</td>
+              </tr>
+              <tr>
+                <td><strong>Data-Heavy</strong></td>
+                <td>Price comparison list</td>
+                <td>Tables, specific numbers, consumer-report tone</td>
+              </tr>
+              <tr>
+                <td><strong>Comparison</strong></td>
+                <td>"Choosing between A and B?"</td>
+                <td>Side-by-side in every section, clear rec at end</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Internal Linking Pattern</h3>
+        <div style="padding: 1rem; background: white; border: 1px solid var(--gray-200); border-radius: 8px;">
+          <div style="text-align: center; margin-bottom: 1rem;">
+            <span class="tag tag-hub" style="font-size: 0.9rem; padding: 0.3rem 0.75rem;">HUB: JFK Parking Guide</span>
+          </div>
+          <div style="display: flex; justify-content: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem;">
+            <span style="color: var(--gray-300);">&#8595;</span>
+            <span style="color: var(--gray-300);">&#8595;</span>
+            <span style="color: var(--gray-300);">&#8595;</span>
+          </div>
+          <div style="display: flex; justify-content: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem;">
+            <span class="tag tag-sub">Long-Term</span>
+            <span class="tag tag-sub">Short-Term</span>
+            <span class="tag tag-sub">Off-Site</span>
+          </div>
+          <div style="display: flex; justify-content: center; gap: 0.5rem; flex-wrap: wrap;">
+            <span style="color: var(--gray-300);">&#8595;</span>
+            <span style="color: var(--gray-300);">&#8595;</span>
+          </div>
+          <div style="display: flex; justify-content: center; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem;">
+            <span class="tag tag-spoke">Cell Phone Lot</span>
+            <span class="tag tag-spoke">EV Charging</span>
+            <span class="tag tag-spoke">Deals & Coupons</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Queue -->
+  <section id="queue">
+    <h2>Queue System</h2>
+    <p>Articles are managed in a CMS-backed queue with statuses, priorities, and batch grouping.</p>
+
+    <div class="card">
+      <h3>Queue Item Fields</h3>
+      <table>
+        <thead><tr><th>Field</th><th>Type</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><code>keyword</code></td><td>string</td><td>Target search keyword (e.g., "JFK long-term parking")</td></tr>
+          <tr><td><code>suggestedTitle</code></td><td>string</td><td>Article title for SEO</td></tr>
+          <tr><td><code>airportCode</code></td><td>string</td><td>JFK, LGA, etc.</td></tr>
+          <tr><td><code>slug</code></td><td>string</td><td>URL path segment</td></tr>
+          <tr><td><code>articleType</code></td><td>hub | sub-pillar | spoke</td><td>Content tier</td></tr>
+          <tr><td><code>articleStyle</code></td><td>standard | narrative | listicle | data-heavy | comparison</td><td>Writing approach</td></tr>
+          <tr><td><code>priority</code></td><td>S1 | S2 | S3</td><td>Strategic priority</td></tr>
+          <tr><td><code>status</code></td><td>queued | generating | draft | review | published | error</td><td>Pipeline stage</td></tr>
+          <tr><td><code>outline</code></td><td>array</td><td>Pre-defined H2 headings with summaries and cross-links</td></tr>
+          <tr><td><code>competitorUrls</code></td><td>array</td><td>Manual URLs to scrape (supplements SerpAPI)</td></tr>
+          <tr><td><code>batch</code></td><td>string</td><td>Group name for batch publishing</td></tr>
+          <tr><td><code>parentSlug</code></td><td>string</td><td>Spoke &rarr; sub-pillar reference</td></tr>
+          <tr><td><code>hubSlug</code></td><td>string</td><td>Always points to the airport's hub article</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Status Flow</h3>
+    <div class="flow-row">
+      <div class="flow-box" style="background: var(--gray-100);">queued</div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-box" style="background: var(--amber-light);">generating</div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-box" style="background: var(--blue-light);">draft</div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-box" style="background: var(--purple-light);">review</div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-box" style="background: var(--green-light);">published</div>
+    </div>
+    <p style="margin-top: 0.5rem; font-size: 0.85rem;">If any step fails, the item is marked <code>error</code> with an error message.</p>
+  </section>
+
+  <!-- Step 1: Scrape -->
+  <section id="step-scrape">
+    <h2>Step 1: Scrape Competitors</h2>
+    <div class="card blue">
+      <p><span class="tag tag-file">scraper.ts</span></p>
+      <h3>How It Works</h3>
+      <ol>
+        <li>Search Google via <strong>SerpAPI</strong> for the target keyword (top 5 results)</li>
+        <li>Optionally uses <strong>manual competitor URLs</strong> from the queue item</li>
+        <li>For each URL, fetch the page with a 15-second timeout</li>
+        <li>Parse with <strong>Cheerio</strong> &mdash; strip nav, footer, sidebar, scripts, styles</li>
+        <li>Extract: <strong>title</strong>, <strong>all H2/H3 headings</strong>, <strong>body text</strong> (capped at 10,000 chars)</li>
+        <li>3-second delay between scrapes to avoid rate limits</li>
+      </ol>
+
+      <h4>Output: ScrapedArticle</h4>
+<pre><code>{
+  url: "https://competitor.com/jfk-parking-guide",
+  title: "JFK Parking Guide 2026",
+  headings: ["How Much Does JFK Parking Cost?", "Best Off-Site Lots", ...],
+  content: "JFK airport offers several parking options..."  // max 10,000 chars
+}</code></pre>
+    </div>
+  </section>
+
+  <!-- Step 2: Analyze -->
+  <section id="step-analyze">
+    <h2>Step 2: Analyze (AI)</h2>
+    <div class="card purple">
+      <p><span class="tag tag-ai">Claude Sonnet 4.5</span> <span class="tag tag-file">prompts/analyze.ts</span></p>
+      <h3>What the AI Does</h3>
+      <p>Reads all scraped competitor articles and identifies patterns, gaps, and opportunities.</p>
+
+      <h4>Prompt Inputs</h4>
+      <ul>
+        <li>Target keyword</li>
+        <li>All scraped articles (title + headings + content for each)</li>
+      </ul>
+
+      <h4>AI Output</h4>
+      <table>
+        <tr><td><strong>commonTopics</strong></td><td>Themes every competitor covers (must-have content)</td></tr>
+        <tr><td><strong>gaps</strong></td><td>Topics competitors miss &mdash; our differentiation opportunities</td></tr>
+        <tr><td><strong>recommendedH2s</strong></td><td>5-8 suggested headings (question format preferred for AI search)</td></tr>
+        <tr><td><strong>faqQuestions</strong></td><td>6-8 high-intent FAQ questions</td></tr>
+        <tr><td><strong>suggestedTags</strong></td><td>3-5 categorization tags</td></tr>
+        <tr><td><strong>estimatedWordCount</strong></td><td>Recommended article length</td></tr>
+      </table>
+
+      <h4>Key Instruction</h4>
+      <p>The analysis prompt emphasizes <strong>entity coverage</strong> &mdash; the AI is told to identify terminal names, airline hubs, roads, transit options, and neighborhoods mentioned across competitors, since entity density is a strong NLP ranking signal.</p>
+    </div>
+  </section>
+
+  <!-- Step 3: Write -->
+  <section id="step-write">
+    <h2>Step 3: Write (AI)</h2>
+    <div class="card purple">
+      <p><span class="tag tag-ai">Claude Sonnet 4.5</span> <span class="tag tag-file">prompts/write.ts</span></p>
+      <h3>What the AI Does</h3>
+      <p>Generates the full article HTML using the analysis results, airport data, external links database, and 32 writing rules.</p>
+    </div>
+
+    <h3>Prompt Inputs</h3>
+    <div class="grid-2">
+      <div class="card">
+        <h4>From Queue Item</h4>
+        <ul>
+          <li>Title, keyword, airport code</li>
+          <li>Article type (hub/sub-pillar/spoke)</li>
+          <li>Article style (standard/narrative/etc.)</li>
+          <li>Pre-defined outline (if any)</li>
+          <li>Hub/parent slugs for cross-linking</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h4>From Analysis + Data</h4>
+        <ul>
+          <li>Common topics &amp; content gaps</li>
+          <li>Recommended headings</li>
+          <li>Airport facts (terminals, rates, transit)</li>
+          <li>Verified external links database</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Writing Rules (32 total)</h3>
+    <p>Grouped by purpose:</p>
+
+    <div class="card highlight">
+      <h4>HTML &amp; Structure (Rules 1-4)</h4>
+      <ul class="rule-list">
+        <li><span class="rule-num">1</span> <strong>Allowed tags:</strong> h2, h3, p, ul, ol, li, a, strong, em, blockquote, table, thead, tbody, tr, th, td</li>
+        <li><span class="rule-num">2</span> <strong>Forbidden:</strong> h1, div, span, img, inline styles, classes, IDs</li>
+        <li><span class="rule-num">3</span> No article title in HTML (handled separately by CMS)</li>
+        <li><span class="rule-num">4</span> Internal links: <code>/blog/[slug]</code> format</li>
+      </ul>
+    </div>
+
+    <div class="card blue">
+      <h4>Links &amp; CTAs (Rules 5, 9-11)</h4>
+      <ul class="rule-list">
+        <li><span class="rule-num blue-num">5</span> <strong>External links:</strong> Only from verified database or .gov sites. Use <code>rel="nofollow"</code> where specified. Never invent URLs.</li>
+        <li><span class="rule-num blue-num">9</span> Reference "Triply" or "TriplyPro" with link to triplypro.com</li>
+        <li><span class="rule-num blue-num">10</span> <strong>Early CTA (first 500 words):</strong> Must be CONTEXTUAL &mdash; reference a specific terminal, price, or parking type from surrounding content. Never generic. Links to <code>/search?airport=JFK</code></li>
+        <li><span class="rule-num blue-num">11</span> <strong>Closing CTA:</strong> Ties back to article's main promise. References specific airport.</li>
+      </ul>
+    </div>
+
+    <div class="card green">
+      <h4>Readability (Rules 12-15)</h4>
+      <ul class="rule-list">
+        <li><span class="rule-num green-num">12</span> <strong>Sentence length:</strong> Average 15-20 words. Never exceed 30. Mix short (8-12) with medium (20-25).</li>
+        <li><span class="rule-num green-num">13</span> <strong>Simple words:</strong> "use" not "utilize", "help" not "facilitate". 8th-grade reading level.</li>
+        <li><span class="rule-num green-num">14</span> <strong>Active voice:</strong> "The shuttle picks you up" not "You will be picked up by the shuttle".</li>
+        <li><span class="rule-num green-num">15</span> <strong>No compound sentences:</strong> Split multi-clause sentences into two.</li>
+      </ul>
+    </div>
+
+    <div class="card purple">
+      <h4>AI Search &amp; Featured Snippets (Rules 16-26)</h4>
+      <ul class="rule-list">
+        <li><span class="rule-num purple-num">16</span> <strong>Opening answer:</strong> First paragraph = concise direct answer, extractable on its own.</li>
+        <li><span class="rule-num purple-num">17</span> <strong>Key Takeaways:</strong> 4-6 bullet list with bold lead phrases, right after opening.</li>
+        <li><span class="rule-num purple-num">18</span> Use <code>&lt;ul&gt;</code> / <code>&lt;ol&gt;</code> lists naturally in most sections.</li>
+        <li><span class="rule-num purple-num">19</span> <strong>Answer-first sections:</strong> Each H2 opens with 1-2 sentence direct answer.</li>
+        <li><span class="rule-num purple-num">20</span> <strong>Question headings:</strong> Frame H2s as questions where natural.</li>
+        <li><span class="rule-num purple-num">21</span> <strong>Definition pattern:</strong> "What is X? X is..." for new concepts (not obvious ones).</li>
+        <li><span class="rule-num purple-num">22</span> <strong>Comparisons:</strong> At least one structured comparison section.</li>
+        <li><span class="rule-num purple-num">23</span> <strong>Source attribution:</strong> Cite real sources. NEVER fabricate.</li>
+        <li><span class="rule-num purple-num">24</span> <strong>E-E-A-T signals:</strong> "based on current rates", "travelers frequently report".</li>
+        <li><span class="rule-num purple-num">25</span> <strong>Bold key terms:</strong> Use <code>&lt;strong&gt;</code> for important names and phrases.</li>
+        <li><span class="rule-num purple-num">26</span> <strong>Entity coverage:</strong> Mention terminals, airlines, roads, neighborhoods, transit.</li>
+      </ul>
+    </div>
+
+    <div class="card amber">
+      <h4>Quality &amp; Freshness (Rules 27-32)</h4>
+      <ul class="rule-list">
+        <li><span class="rule-num amber-num">27</span> <strong>Freshness signals:</strong> "as of 2026" for time-sensitive data. Don't date evergreen facts.</li>
+        <li><span class="rule-num amber-num">28</span> <strong>Paragraph length:</strong> 3-5 sentences (80-120 words). Never exceed 5 sentences.</li>
+        <li><span class="rule-num amber-num">29</span> <strong>No filler:</strong> Every sentence = a fact, tip, or actionable detail.</li>
+        <li><span class="rule-num amber-num">30</span> <strong>Comparison tables:</strong> Use HTML tables for pricing data and side-by-side comparisons.</li>
+        <li><span class="rule-num amber-num">31</span> <strong>Verification dates:</strong> Add "(verified February 2026)" to time-sensitive claims.</li>
+        <li><span class="rule-num amber-num">32</span> <strong>PAA targets:</strong> Include 2-3 "People Also Ask" style headings.</li>
+      </ul>
+    </div>
+
+    <h3>AI Output</h3>
+<pre><code>{
+  "html": "&lt;h2&gt;First Section&lt;/h2&gt;&lt;p&gt;Content...&lt;/p&gt;...",
+  "excerpt": "A brief 1-2 sentence summary (max 300 chars)",
+  "metaTitle": "SEO title (max 60 chars)",
+  "metaDescription": "SEO description (max 160 chars)",
+  "earlyCta": "Compare Terminal 4 parking rates on Triply",
+  "closingCta": "Reserve your JFK parking spot and save up to 60%",
+  "faqItems": [
+    { "question": "How much does JFK parking cost?", "answer": "..." },
+    ...
+  ],
+  "suggestedCategory": "Airport Parking"
+}</code></pre>
+  </section>
+
+  <!-- Step 4: Edit -->
+  <section id="step-edit">
+    <h2>Step 4: Edit (AI)</h2>
+    <div class="card purple">
+      <p><span class="tag tag-ai">Claude Sonnet 4.5</span> <span class="tag tag-file">prompts/edit.ts</span></p>
+      <h3>What the AI Does</h3>
+      <p>A second AI pass that reviews the generated article against 21 quality checks. Fixes issues, improves structure, and assigns a quality score.</p>
+    </div>
+
+    <div class="callout">
+      <strong>Style preservation is critical:</strong> The edit prompt includes a preamble for each article style telling the AI what NOT to change. For example, narrative articles should NOT have a Key Takeaways list added, and listicle articles should keep their numbered headings.
+    </div>
+
+    <h3>21 Quality Checks</h3>
+
+    <div class="grid-2">
+      <div class="card">
+        <h4>Accuracy &amp; Structure (1-7)</h4>
+        <ul class="rule-list">
+          <li><span class="rule-num">1</span> Remove made-up statistics or prices</li>
+          <li><span class="rule-num">2</span> Keyword in first paragraph, 2+ H2s, conclusion</li>
+          <li><span class="rule-num">3</span> Internal links use <code>/blog/[slug]</code></li>
+          <li><span class="rule-num">3b</span> External links only from approved database</li>
+          <li><span class="rule-num">4</span> Only allowed HTML tags</li>
+          <li><span class="rule-num">5</span> Readability: Flesch-Kincaid grade 6-9</li>
+          <li><span class="rule-num">6</span> Early + closing CTAs present and contextual</li>
+          <li><span class="rule-num">7</span> Remove AI phrases ("In conclusion", "game-changer")</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h4>AI Search Optimization (8-18)</h4>
+        <ul class="rule-list">
+          <li><span class="rule-num purple-num">8</span> Opening = direct answer to main query</li>
+          <li><span class="rule-num purple-num">9</span> Key Takeaways list exists near top</li>
+          <li><span class="rule-num purple-num">10</span> Lists in most H2 sections</li>
+          <li><span class="rule-num purple-num">11</span> Answer-first sections (1-2 sentence lead)</li>
+          <li><span class="rule-num purple-num">12</span> Question-format headings</li>
+          <li><span class="rule-num purple-num">13</span> Source attribution (never fabricated)</li>
+          <li><span class="rule-num purple-num">14</span> Bold key terms (2-4 per section)</li>
+          <li><span class="rule-num purple-num">15</span> Paragraph &amp; sentence length limits</li>
+          <li><span class="rule-num purple-num">16</span> No filler sentences</li>
+          <li><span class="rule-num purple-num">17</span> E-E-A-T credibility language</li>
+          <li><span class="rule-num purple-num">18</span> Freshness signals on time-sensitive data</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card amber">
+      <h4>New Checks (19-21)</h4>
+      <ul class="rule-list">
+        <li><span class="rule-num amber-num">19</span> <strong>Comparison tables:</strong> If comparing options/rates, convert to HTML table</li>
+        <li><span class="rule-num amber-num">20</span> <strong>Verification dates:</strong> Time-sensitive claims need "(verified Month Year)"</li>
+        <li><span class="rule-num amber-num">21</span> <strong>Table presence:</strong> Data-heavy/comparison articles must have at least one table</li>
+      </ul>
+    </div>
+
+    <h3>AI Output</h3>
+<pre><code>{
+  "html": "&lt;h2&gt;Edited content...&lt;/h2&gt;...",
+  "changes": [
+    "Shortened opening paragraph for directness",
+    "Added Key Takeaways section",
+    "Converted pricing list to table",
+    "Added verification dates to rate claims"
+  ],
+  "qualityScore": 87
+}</code></pre>
+  </section>
+
+  <!-- SEO Scoring -->
+  <section id="scoring">
+    <h2>SEO Scoring</h2>
+    <p><span class="tag tag-file">seo-scorer.ts</span> &mdash; A deterministic 100-point rubric that scores every article after editing.</p>
+
+    <div class="score-grid">
+      <div class="score-card">
+        <div class="pts">21 <span>pts</span></div>
+        <div class="label">Keyword Optimization</div>
+      </div>
+      <div class="score-card">
+        <div class="pts">32 <span>pts</span></div>
+        <div class="label">Content Structure</div>
+      </div>
+      <div class="score-card">
+        <div class="pts">21 <span>pts</span></div>
+        <div class="label">AI Search Optimization</div>
+      </div>
+      <div class="score-card">
+        <div class="pts">26 <span>pts</span></div>
+        <div class="label">Content Quality</div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <h4>Keyword Optimization (21 pts)</h4>
+        <table>
+          <tr><td>Keyword in first paragraph</td><td>4 pts</td></tr>
+          <tr><td>Keyword in 2+ H2 headings</td><td>3 pts</td></tr>
+          <tr><td>Keyword density 0.5-2.5%</td><td>4 pts</td></tr>
+          <tr><td>Keyword in meta title</td><td>5 pts</td></tr>
+          <tr><td>Keyword in meta description</td><td>2 pts</td></tr>
+          <tr><td>Keyword in URL slug</td><td>3 pts</td></tr>
+        </table>
+      </div>
+      <div class="card">
+        <h4>Content Structure (32 pts)</h4>
+        <table>
+          <tr><td>Meets word count target (80%+)</td><td>4 pts</td></tr>
+          <tr><td>Heading hierarchy (no skips)</td><td>3 pts</td></tr>
+          <tr><td>Paragraphs under 120 words</td><td>2 pts</td></tr>
+          <tr><td>2+ internal links</td><td>3 pts</td></tr>
+          <tr><td>1+ external links</td><td>3 pts</td></tr>
+          <tr><td>Featured image with alt text</td><td>2 pts</td></tr>
+          <tr><td>Meta title under 60 chars</td><td>2 pts</td></tr>
+          <tr><td>Meta desc 120-160 chars</td><td>2 pts</td></tr>
+          <tr><td>Early + closing CTA placement</td><td>4 pts</td></tr>
+          <tr><td>Descriptive anchor text (80%+)</td><td>3 pts</td></tr>
+          <tr><td>Topical authority links</td><td>4 pts</td></tr>
+        </table>
+      </div>
+      <div class="card">
+        <h4>AI Search Optimization (21 pts)</h4>
+        <table>
+          <tr><td>Opening direct answer (&lt;80 words)</td><td>3 pts</td></tr>
+          <tr><td>Key Takeaways list near top</td><td>3 pts</td></tr>
+          <tr><td>Lists in 30%+ of sections</td><td>4 pts</td></tr>
+          <tr><td>2+ question-format headings</td><td>3 pts</td></tr>
+          <tr><td>6+ FAQ items</td><td>3 pts</td></tr>
+          <tr><td>8+ bold key terms</td><td>2 pts</td></tr>
+          <tr><td>3+ source attributions</td><td>3 pts</td></tr>
+        </table>
+      </div>
+      <div class="card">
+        <h4>Content Quality (26 pts)</h4>
+        <table>
+          <tr><td>No AI-sounding phrases</td><td>5 pts</td></tr>
+          <tr><td>E-E-A-T signals present</td><td>3 pts</td></tr>
+          <tr><td>4+ entity types mentioned</td><td>4 pts</td></tr>
+          <tr><td>3+ freshness signals</td><td>2 pts</td></tr>
+          <tr><td>Power words in title</td><td>2 pts</td></tr>
+          <tr><td>Number in title</td><td>2 pts</td></tr>
+          <tr><td>Flesch-Kincaid grade 6-9</td><td>4 pts</td></tr>
+          <tr><td>2+ unique value indicators</td><td>4 pts</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <h3>Grade Scale</h3>
+    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem;">
+      <span class="tag" style="background: #dcfce7; color: #166534;">A+ (95+)</span>
+      <span class="tag" style="background: #dcfce7; color: #166534;">A (90+)</span>
+      <span class="tag" style="background: #e0f2fe; color: #075985;">B+ (85+)</span>
+      <span class="tag" style="background: #e0f2fe; color: #075985;">B (80+)</span>
+      <span class="tag" style="background: #fef9c3; color: #854d0e;">C (70+)</span>
+      <span class="tag" style="background: #fed7aa; color: #9a3412;">D (60+)</span>
+      <span class="tag" style="background: #fecaca; color: #991b1b;">F (&lt;60)</span>
+    </div>
+  </section>
+
+  <!-- Data Sources -->
+  <section id="data">
+    <h2>Data Sources</h2>
+    <p>The AI is grounded with verified, factual data to prevent hallucination.</p>
+
+    <div class="grid-2">
+      <div class="card blue">
+        <h3>Airport Data</h3>
+        <p><span class="tag tag-file">data/airports/JFK.json</span> <span class="tag tag-file">LGA.json</span></p>
+        <p>Verified airport facts injected into the write prompt:</p>
+        <ul>
+          <li>Full airport name &amp; authority</li>
+          <li>Terminal list with airlines per terminal</li>
+          <li>Nearby roads, transit options, neighborhoods</li>
+          <li>Official parking rates &amp; shuttle info</li>
+          <li>Distance from city center</li>
+          <li><strong>liveSources</strong> &mdash; verified URLs grouped by topic (official, transit, parking, lounges, EV, etc.)</li>
+        </ul>
+        <p><strong>Rule:</strong> The AI must use ONLY these facts for specific claims. Uncertain facts get hedging language ("typically", "around").</p>
+      </div>
+
+      <div class="card green">
+        <h3>External Links Database</h3>
+        <p><span class="tag tag-file">data/external-links.json</span></p>
+        <p>50 verified outbound links with metadata:</p>
+        <ul>
+          <li>URL, domain, title, description</li>
+          <li>Authority level (high / medium / low)</li>
+          <li>Suggested anchor texts (vary naturally)</li>
+          <li><code>rel</code> attribute (dofollow / nofollow / sponsored)</li>
+          <li>Relevant airports &amp; article types</li>
+          <li>Categories: official-airport, government, transit, parking-aggregator, lounge-guide, etc.</li>
+        </ul>
+        <h4>Density Guide</h4>
+        <table>
+          <tr><td><span class="tag tag-hub">Hub</span></td><td>6-10 external links</td></tr>
+          <tr><td><span class="tag tag-sub">Sub-Pillar</span></td><td>4-7 external links</td></tr>
+          <tr><td><span class="tag tag-spoke">Spoke</span></td><td>2-4 external links</td></tr>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- CMS Publishing -->
+  <section id="cms">
+    <h2>CMS Publishing</h2>
+    <p><span class="tag tag-file">payload.ts</span> <span class="tag tag-file">html-to-lexical.ts</span></p>
+
+    <div class="card">
+      <h3>HTML &rarr; Lexical Conversion</h3>
+      <p>Payload CMS stores rich text in <strong>Lexical JSON format</strong>, not raw HTML. The converter transforms AI-generated HTML into Lexical's node tree:</p>
+      <table>
+        <thead><tr><th>HTML</th><th>Lexical Node</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td><code>&lt;h2&gt;</code> - <code>&lt;h6&gt;</code></td><td><code>heading</code></td><td>With tag property (h2, h3, etc.)</td></tr>
+          <tr><td><code>&lt;p&gt;</code></td><td><code>paragraph</code></td><td></td></tr>
+          <tr><td><code>&lt;ul&gt;</code> / <code>&lt;ol&gt;</code></td><td><code>list</code></td><td>With listType: bullet/number</td></tr>
+          <tr><td><code>&lt;li&gt;</code></td><td><code>listitem</code></td><td>Supports nested lists</td></tr>
+          <tr><td><code>&lt;a&gt;</code></td><td><code>link</code></td><td>Preserves href + rel attribute</td></tr>
+          <tr><td><code>&lt;strong&gt;</code> / <code>&lt;em&gt;</code></td><td><code>text</code> (format bitmask)</td><td>Bold=1, Italic=2</td></tr>
+          <tr><td><code>&lt;blockquote&gt;</code></td><td><code>quote</code></td><td></td></tr>
+          <tr><td><code>&lt;table&gt;</code></td><td><code>table</code></td><td>Stores raw HTML for rendering</td></tr>
+          <tr><td><code>&lt;br&gt;</code></td><td><code>linebreak</code></td><td></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>Post Creation</h3>
+      <p>After conversion, a CMS post is created with:</p>
+      <ul>
+        <li><strong>title</strong>, <strong>slug</strong>, <strong>excerpt</strong></li>
+        <li><strong>content</strong> &mdash; Lexical JSON document</li>
+        <li><strong>seo</strong> &mdash; metaTitle + metaDescription</li>
+        <li><strong>faqItems</strong> &mdash; question/answer pairs</li>
+        <li><strong>category</strong> + <strong>tags</strong> (found or created)</li>
+        <li><strong>featuredImage</strong> &mdash; uploaded via Unsplash</li>
+        <li><strong>articleType</strong>, <strong>airportCode</strong>, <strong>seoScore</strong></li>
+        <li><strong>status: "draft"</strong> (requires manual review before publishing)</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- File Reference -->
+  <section id="files">
+    <h2>File Reference</h2>
+
+    <div class="file-tree">
+      <span class="folder">scripts/blog-engine/</span><br>
+      &nbsp;&nbsp;<span class="folder">src/</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">index.ts</span> <span class="comment">&mdash; CLI entry point (generate, publish, report, score)</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">config.ts</span> <span class="comment">&mdash; env vars, API keys, constants</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">queue.ts</span> <span class="comment">&mdash; queue item management + prerequisite validation</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">import-queue.ts</span> <span class="comment">&mdash; CSV import for initial queue population</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">scraper.ts</span> <span class="comment">&mdash; SerpAPI search + Cheerio scraping</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">claude.ts</span> <span class="comment">&mdash; Anthropic API client wrapper</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="folder">prompts/</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">analyze.ts</span> <span class="comment">&mdash; competitor analysis prompt</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">write.ts</span> <span class="comment">&mdash; article generation prompt (32 rules)</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">edit.ts</span> <span class="comment">&mdash; quality editing prompt (21 checks)</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">seo-scorer.ts</span> <span class="comment">&mdash; 100-point SEO scoring rubric</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">html-to-lexical.ts</span> <span class="comment">&mdash; HTML &rarr; Payload Lexical JSON</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">lexical-to-html.ts</span> <span class="comment">&mdash; Lexical JSON &rarr; HTML (for scoring)</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">payload.ts</span> <span class="comment">&mdash; CMS API client (posts, media, categories, tags)</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">unsplash.ts</span> <span class="comment">&mdash; Featured image search + download</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">airport-data.ts</span> <span class="comment">&mdash; Load verified airport JSON</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">external-links.ts</span> <span class="comment">&mdash; Load + filter external links database</span><br>
+      &nbsp;&nbsp;<span class="folder">data/</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="folder">airports/</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">JFK.json</span> <span class="comment">&mdash; ~50 verified URLs, full terminal/transit data</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">LGA.json</span> <span class="comment">&mdash; ~30 verified URLs, comprehensive data</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">external-links.json</span> <span class="comment">&mdash; 50 verified outbound links</span><br>
+    </div>
+  </section>
+
+  <!-- CLI Commands -->
+  <section id="commands">
+    <h2>CLI Commands</h2>
+
+    <div class="card">
+      <h3>Generate Articles</h3>
+<pre><code>npm run generate                   # Generate next queued article
+npm run generate -- -n 5           # Generate 5 articles
+npm run generate -- -t hub         # Only hub articles
+npm run generate -- -a JFK         # Only JFK airport
+npm run generate -- --dry-run      # Preview without creating posts</code></pre>
+    </div>
+
+    <div class="card">
+      <h3>Publish Batch</h3>
+<pre><code>npm run publish -- -b batch-1      # Publish all drafts in "batch-1"
+npm run publish -- -b batch-1 --dry-run</code></pre>
+    </div>
+
+    <div class="card">
+      <h3>Score Articles</h3>
+<pre><code>npm run score -- --slug jfk-airport-parking-deals
+npm run score -- --airport JFK     # Score all JFK articles
+npm run score -- --all             # Score everything
+npm run score -- --all --save      # Score and save back to CMS</code></pre>
+    </div>
+
+    <div class="card">
+      <h3>Report</h3>
+<pre><code>npm run report                     # Full queue status
+npm run report -- -a JFK           # JFK only
+npm run report -- -b batch-1       # Specific batch</code></pre>
+    </div>
+
+    <div class="card">
+      <h3>Environment Variables</h3>
+      <table>
+        <tr><td><code>ANTHROPIC_API_KEY</code></td><td><strong>Required</strong></td><td>Claude API key</td></tr>
+        <tr><td><code>PAYLOAD_CMS_URL</code></td><td>Default: localhost:3001</td><td>CMS endpoint</td></tr>
+        <tr><td><code>PAYLOAD_API_KEY</code></td><td><strong>Required</strong></td><td>CMS auth key</td></tr>
+        <tr><td><code>SERPAPI_API_KEY</code></td><td>Optional</td><td>Google search (falls back to manual URLs)</td></tr>
+        <tr><td><code>UNSPLASH_ACCESS_KEY</code></td><td>Optional</td><td>Featured images</td></tr>
+      </table>
+    </div>
+  </section>
+
+</div>
+
+<div class="footer">
+  Triply Blog Engine Documentation &mdash; Last updated February 2026
+</div>
+
+</body>
+</html>

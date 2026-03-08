@@ -70,14 +70,21 @@ interface LexicalQuoteNode extends LexicalElementNode {
 export interface LexicalUploadNode {
   type: 'upload'
   relationTo: 'media'
-  value: {
-    id: string
-    url: string
-    alt: string
-    width: number
-    height: number
-  }
+  value: number | string  // Media ID — Payload hydrates to full media doc on fetch (depth > 0)
   version: 2
+}
+
+interface LexicalTableNode extends LexicalElementNode {
+  type: 'table'
+}
+
+interface LexicalTableRowNode extends LexicalElementNode {
+  type: 'tablerow'
+}
+
+interface LexicalTableCellNode extends LexicalElementNode {
+  type: 'tablecell'
+  headerState: 0 | 1
 }
 
 interface LexicalRootNode {
@@ -99,6 +106,9 @@ type LexicalNode =
   | LexicalLinkNode
   | LexicalQuoteNode
   | LexicalUploadNode
+  | LexicalTableNode
+  | LexicalTableRowNode
+  | LexicalTableCellNode
   | LexicalElementNode
 
 export interface LexicalDocument {
@@ -213,6 +223,51 @@ function makeQuoteNode(children: LexicalNode[]): LexicalQuoteNode {
     version: 1,
     textFormat: 0,
     textStyle: '',
+  }
+}
+
+function makeTableNode(children: LexicalNode[]): LexicalTableNode {
+  return {
+    type: 'table',
+    children,
+    direction: 'ltr',
+    format: '',
+    indent: 0,
+    version: 1,
+  }
+}
+
+function makeTableRowNode(children: LexicalNode[]): LexicalTableRowNode {
+  return {
+    type: 'tablerow',
+    children,
+    direction: 'ltr',
+    format: '',
+    indent: 0,
+    version: 1,
+  }
+}
+
+function makeTableCellNode(children: LexicalNode[], headerState: 0 | 1 = 0): LexicalTableCellNode {
+  return {
+    type: 'tablecell',
+    headerState,
+    children,
+    direction: 'ltr',
+    format: '',
+    indent: 0,
+    version: 1,
+  }
+}
+
+function makeUploadNode(id: string, _url: string, _alt: string, _width: number, _height: number): LexicalUploadNode {
+  // Payload expects the media ID as a number (Postgres integer PK)
+  const numericId = parseInt(id, 10)
+  return {
+    type: 'upload',
+    relationTo: 'media',
+    value: isNaN(numericId) ? id : numericId,
+    version: 2,
   }
 }
 
@@ -353,18 +408,25 @@ function convertBlockElement(el: HTMLElement): LexicalNode[] {
     }
 
     case 'table': {
-      // Convert HTML tables to structured bullet lists to avoid Lexical error #17
-      // (CMS editor doesn't have TableFeature registered)
+      // Convert HTML tables to native Lexical table nodes.
+      // Requires TableFeature() in the CMS Lexical editor config,
+      // and the frontend RichText.tsx must handle table/tablerow/tablecell nodes.
 
-      // Collect <tr> elements from thead, tbody, tfoot, or direct children
       const rowEls: HTMLElement[] = []
+      const headerEls: HTMLElement[] = []
       for (const child of el.childNodes) {
         if (child.nodeType !== NodeType.ELEMENT_NODE) continue
         const childEl = child as HTMLElement
         const childTag = childEl.tagName?.toLowerCase()
         if (childTag === 'tr') {
           rowEls.push(childEl)
-        } else if (childTag === 'thead' || childTag === 'tbody' || childTag === 'tfoot') {
+        } else if (childTag === 'thead') {
+          for (const grandchild of childEl.childNodes) {
+            if (grandchild.nodeType === NodeType.ELEMENT_NODE && (grandchild as HTMLElement).tagName?.toLowerCase() === 'tr') {
+              headerEls.push(grandchild as HTMLElement)
+            }
+          }
+        } else if (childTag === 'tbody' || childTag === 'tfoot') {
           for (const grandchild of childEl.childNodes) {
             if (grandchild.nodeType === NodeType.ELEMENT_NODE && (grandchild as HTMLElement).tagName?.toLowerCase() === 'tr') {
               rowEls.push(grandchild as HTMLElement)
@@ -373,60 +435,63 @@ function convertBlockElement(el: HTMLElement): LexicalNode[] {
         }
       }
 
-      if (rowEls.length === 0) return []
+      const allRows: HTMLElement[] = [...headerEls, ...rowEls]
+      if (allRows.length === 0) return []
 
-      // Extract header names from the first row if it contains <th> cells
-      const headers: string[] = []
-      const firstRow = rowEls[0]
-      let dataStartIndex = 0
-      for (const cellChild of firstRow.childNodes) {
-        if (cellChild.nodeType !== NodeType.ELEMENT_NODE) continue
-        const cellEl = cellChild as HTMLElement
-        if (cellEl.tagName?.toLowerCase() === 'th') {
-          headers.push(cellEl.textContent.trim())
-        }
-      }
-      if (headers.length > 0) {
-        dataStartIndex = 1 // skip the header row
-      }
-
-      // Build list items from data rows
-      const items: LexicalNode[] = []
-      let itemIndex = 1
-      for (let i = dataStartIndex; i < rowEls.length; i++) {
-        const rowEl = rowEls[i]
-        const cellTexts: string[] = []
+      const tableRows: LexicalNode[] = []
+      for (const rowEl of allRows) {
+        const cells: LexicalNode[] = []
         for (const cellChild of rowEl.childNodes) {
           if (cellChild.nodeType !== NodeType.ELEMENT_NODE) continue
           const cellEl = cellChild as HTMLElement
           const cellTag = cellEl.tagName?.toLowerCase()
           if (cellTag === 'th' || cellTag === 'td') {
-            cellTexts.push(cellEl.textContent.trim())
+            const isHeader = cellTag === 'th' ? 1 : 0
+            const cellContent = convertInlineChildren(cellEl)
+            if (cellContent.length === 0) cellContent.push(makeTextNode(''))
+            cells.push(makeTableCellNode([makeParagraphNode(cellContent)], isHeader as 0 | 1))
           }
         }
-
-        if (cellTexts.length === 0) continue
-
-        // Build inline nodes: **Header**: value | **Header**: value
-        const inlineNodes: LexicalNode[] = []
-        for (let c = 0; c < cellTexts.length; c++) {
-          if (c > 0) {
-            inlineNodes.push(makeTextNode(' | '))
-          }
-          if (headers.length > 0 && c < headers.length) {
-            inlineNodes.push(makeTextNode(`${headers[c]}: `, FORMAT_BOLD))
-            inlineNodes.push(makeTextNode(cellTexts[c]))
-          } else {
-            inlineNodes.push(makeTextNode(cellTexts[c]))
-          }
+        if (cells.length > 0) {
+          tableRows.push(makeTableRowNode(cells))
         }
-
-        items.push(makeListItemNode(inlineNodes, itemIndex))
-        itemIndex++
       }
 
-      if (items.length === 0) return []
-      return [makeListNode('bullet', 'ul', items)]
+      if (tableRows.length === 0) return []
+      return [makeTableNode(tableRows)]
+    }
+
+    case 'figure': {
+      // Handle <figure> wrapping <img> with optional <figcaption>
+      const imgEl = el.querySelector('img')
+      if (imgEl) {
+        const id = imgEl.getAttribute('data-media-id') || ''
+        const src = imgEl.getAttribute('src') || ''
+        const alt = imgEl.getAttribute('alt') || ''
+        const width = parseInt(imgEl.getAttribute('data-width') || imgEl.getAttribute('width') || '0', 10)
+        const height = parseInt(imgEl.getAttribute('data-height') || imgEl.getAttribute('height') || '0', 10)
+        // Use figcaption as alt text if present and no alt on img
+        if (!alt) {
+          const figcaption = el.querySelector('figcaption')
+          if (figcaption) {
+            return [makeUploadNode(id, src, figcaption.textContent.trim(), width, height)]
+          }
+        }
+        return [makeUploadNode(id, src, alt, width, height)]
+      }
+      // Not an image figure — convert children normally
+      return convertChildBlocks(el)
+    }
+
+    case 'img': {
+      // Convert <img> to Lexical upload node
+      // data-media-id and data-width/data-height are set by the inline-images resolver
+      const id = el.getAttribute('data-media-id') || ''
+      const src = el.getAttribute('src') || ''
+      const alt = el.getAttribute('alt') || ''
+      const width = parseInt(el.getAttribute('data-width') || el.getAttribute('width') || '0', 10)
+      const height = parseInt(el.getAttribute('data-height') || el.getAttribute('height') || '0', 10)
+      return [makeUploadNode(id, src, alt, width, height)]
     }
 
     case 'br':
@@ -469,7 +534,7 @@ function convertChildBlocks(container: HTMLElement): LexicalNode[] {
     const tag = el.tagName?.toLowerCase()
 
     // Block-level elements flush pending inline and convert as blocks
-    const blockTags = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'ul', 'ol', 'blockquote', 'div', 'section', 'article', 'main', 'header', 'footer', 'table', 'figure', 'pre']
+    const blockTags = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'ul', 'ol', 'blockquote', 'div', 'section', 'article', 'main', 'header', 'footer', 'table', 'figure', 'img', 'pre']
 
     if (blockTags.includes(tag)) {
       flushInline()

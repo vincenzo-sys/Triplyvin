@@ -8,6 +8,7 @@ import { scrapeCompetitors } from './scraper.js'
 import type { ScrapedArticle } from './scraper.js'
 import { generateArticle } from './claude.js'
 import { htmlToLexical } from './html-to-lexical.js'
+import { generateInfographics } from './infographics.js'
 import { getAirportPhoto } from './unsplash.js'
 import {
   createPost,
@@ -72,6 +73,9 @@ interface ArticleReport {
     changesCount: number
     qualityScore: number
     changes: string[]
+  }
+  infographics: {
+    count: number
   }
   image: {
     found: boolean
@@ -169,6 +173,9 @@ function printReport(report: ArticleReport) {
     }
   }
 
+  console.log(`\n  INFOGRAPHICS:`)
+  console.log(`    Generated: ${report.infographics.count}`)
+
   console.log(`\n  IMAGE:`)
   if (report.image.found) {
     console.log(`    File: ${report.image.filename}`)
@@ -231,7 +238,7 @@ program
       }
 
       for (const item of items) {
-        console.log(`\n━━━ Processing: ${item.suggestedTitle} ━━━`)
+        console.log(`\n━━━ Processing: ${item.suggestedTitle || item.keyword} ━━━`)
         console.log(`  Type: ${item.articleType} | Airport: ${item.airportCode} | Priority: ${item.priority}`)
 
         // Validate prerequisites
@@ -250,7 +257,7 @@ program
         const report: ArticleReport = {
           timestamp: new Date().toISOString(),
           queueItemId: item.id,
-          title: item.suggestedTitle,
+          title: item.suggestedTitle || item.keyword,
           slug: item.slug,
           keyword: item.keyword,
           articleType: item.articleType,
@@ -260,6 +267,7 @@ program
           analysis: { commonTopics: [], contentGaps: [], recommendedH2s: [], faqQuestions: [], suggestedTags: [] },
           article: { htmlLength: 0, estimatedWordCount: 0, faqCount: 0, excerpt: '', metaTitle: '', metaDescription: '', suggestedCategory: '' },
           editing: { changesCount: 0, qualityScore: 0, changes: [] },
+          infographics: { count: 0 },
           image: { found: false, filename: null, alt: null, mediaId: null },
           post: { postId: null, status: 'draft', categoryCreated: '', tagsCreated: [] },
           timing: { totalSeconds: 0, scrapeSeconds: 0, analyzeSeconds: 0, writeSeconds: 0, editSeconds: 0, uploadSeconds: 0 },
@@ -334,6 +342,10 @@ program
             report.revision = result.revision
           }
 
+          // Resolve title: AI-generated > spreadsheet > keyword
+          const resolvedTitle = result.title || item.suggestedTitle || item.keyword
+          report.title = resolvedTitle
+
           // Article stats
           report.article = {
             htmlLength: result.html.length,
@@ -366,9 +378,27 @@ program
           report.seoScore = seoScore
           console.log(`  ✓ SEO Score: ${seoScore.total}/${seoScore.maxTotal} (${seoScore.grade})`)
 
+          // Generate infographics (Claude SVG → resvg PNG → Payload upload)
+          let contentHtml = result.html
+          if (airportData) {
+            try {
+              console.log('  Generating infographics...')
+              const infResult = await generateInfographics(contentHtml, airportData, item.airportCode)
+              contentHtml = infResult.html
+              report.infographics.count = infResult.count
+              if (infResult.count > 0) {
+                console.log(`  ✓ ${infResult.count} infographic(s) generated`)
+              } else {
+                console.log('  No infographics generated')
+              }
+            } catch (err) {
+              console.log(`  ⚠ Infographic generation failed: ${err instanceof Error ? err.message : err} — continuing without`)
+            }
+          }
+
           // Convert HTML to Lexical
           console.log('  Converting to Lexical format...')
-          const lexicalContent = htmlToLexical(result.html)
+          const lexicalContent = htmlToLexical(contentHtml)
 
           // Upload featured image
           const uploadStart = Date.now()
@@ -420,7 +450,7 @@ program
           const postStatus = result.suggestedStatus || 'draft'
           console.log(`  Creating ${postStatus} post in CMS...`)
           const postData: Record<string, unknown> = {
-            title: item.suggestedTitle,
+            title: resolvedTitle,
             slug: item.slug,
             excerpt: result.excerpt,
             content: lexicalContent,
@@ -463,7 +493,7 @@ program
           report.timing.totalSeconds = Math.round((Date.now() - totalStart) / 1000)
 
           console.log(`  ✅ Draft created! SEO Score: ${report.seoScore?.total}/${report.seoScore?.maxTotal} (${report.seoScore?.grade})`)
-          console.log(`  📝 Review at: CMS Admin → Posts → "${item.suggestedTitle}"`)
+          console.log(`  📝 Review at: CMS Admin → Posts → "${resolvedTitle}"`)
 
           // Print reports
           printReport(report)
@@ -531,7 +561,7 @@ program
         console.log(`\n${status.toUpperCase()} (${group.length}):`)
         for (const item of group) {
           const batchTag = item.batch ? ` [${item.batch}]` : ''
-          console.log(`  ${item.priority} | ${item.airportCode} | ${item.articleType.padEnd(11)} | ${item.suggestedTitle}${batchTag}`)
+          console.log(`  ${item.priority} | ${item.airportCode} | ${item.articleType.padEnd(11)} | ${item.suggestedTitle || item.keyword}${batchTag}`)
         }
       }
 
@@ -583,7 +613,7 @@ program
       for (const item of items) {
         const postId = typeof item.generatedPost === 'string' ? item.generatedPost : null
         console.log(`  ${item.slug}`)
-        console.log(`    Title: ${item.suggestedTitle}`)
+        console.log(`    Title: ${item.suggestedTitle || item.keyword}`)
         console.log(`    Status: ${item.status} → published`)
         console.log(`    Post ID: ${postId || 'none'}`)
 
