@@ -35,14 +35,14 @@ function getArticleTypeInstructions(item: QueueItem): string {
 - Each H2 section should briefly introduce a subtopic and include a CTA link to the sub-pillar article
 - Use links in this format: <a href="${BLOG_BASE_URL}/[sub-pillar-slug]">Read our complete guide to [topic]</a>
 - The tone should be authoritative and comprehensive — this is THE definitive guide
-- Target length: 2000-2500 words`
+- Target length: 3000-3500 words`
 
     case 'sub-pillar':
       return `This is a SUB-PILLAR article — a detailed guide on a specific aspect of ${item.airportCode} airport parking.
 - Start the introduction with a link back to the hub: <a href="${BLOG_BASE_URL}/${item.hubSlug}">Complete ${item.airportCode} Airport Parking Guide</a>
 - Go deep on this specific topic — more detail than the hub provides
 - Cross-link to 2-3 sibling sub-pillar articles where relevant
-- Target length: 1500-2000 words`
+- Target length: 2000-2500 words`
 
     case 'spoke':
       return `This is a SPOKE article — a focused, specific piece about ${item.airportCode} airport parking.
@@ -303,21 +303,25 @@ export function buildWritePrompt(
 ): string {
   const outlineSection = item.outline?.length
     ? `\n\nFollow this outline:\n${item.outline.map((o) => `${o.order}. ${o.heading}${o.summary ? ` — ${o.summary}` : ''}${o.linksTo ? ` [Link to: ${BLOG_BASE_URL}/${o.linksTo}]` : ''}`).join('\n')}`
-    : `\n\nUse these recommended headings:\n${analysis.recommendedH2s.map((h, i) => `${i + 1}. ${h}`).join('\n')}`
+    : `\n\nUse these recommended headings (cover ALL of them — these reflect what top-ranking competitors cover):\n${analysis.recommendedH2s.map((h, i) => `${i + 1}. ${h}`).join('\n')}`
 
   return `You are a professional travel and airport parking content writer for ${DOMAIN}.
 
-Write an SEO-optimized blog article with the following parameters:
+Write an SEO-optimized blog article for this focus keyword:
 
-**Target keyword:** ${item.keyword}
+**Focus keyword:** ${item.keyword}
 **Airport:** ${item.airportCode}
+**URL slug:** /blog/${item.slug}
+
+The focus keyword is the exact search query we want to rank for. Everything flows from it — the title, the URL slug, the content angle.
 
 **Generate an article title** (50-65 characters) that:
-- Places the target keyword near the front
-- Is compelling and specific (not generic)
-- Omits the year unless content is genuinely time-sensitive
-- Hub = authoritative guide title; Sub-pillar = deep-dive title; Spoke = specific answer title
-${item.suggestedTitle ? `**Title guidance (optional angle):** ${item.suggestedTitle}` : ''}
+- Contains the EXACT focus keyword (or very close variant) — this is non-negotiable
+- Places the keyword near the front of the title
+- Is compelling, specific, and matches the search intent behind "${item.keyword}"
+- Omits the year unless content is genuinely time-sensitive (rates, deals, promos = add year)
+- Hub = authoritative comprehensive guide title; Sub-pillar = detailed deep-dive title; Spoke = specific focused answer title
+- The title should reflect what you've learned from the competitor analysis — pick the angle that will best serve the searcher
 
 ${getArticleTypeInstructions(item)}
 ${publishedPosts && publishedPosts.length > 0 ? formatPublishedPosts(publishedPosts) : ''}${clusterArticles && clusterArticles.length > 0 ? formatClusterContext(clusterArticles, item) : ''}
@@ -333,11 +337,13 @@ ${airportData ? formatAirportData(airportData, item.keyword) + '\n\n' : ''}${(()
 - Average lists: ${analysis.competitorBenchmarks.avgListCount}
 - Average tables: ${analysis.competitorBenchmarks.avgTableCount}
 - Average links: ${analysis.competitorBenchmarks.avgLinkCount}
-` : ''}**Topics to cover (from competitor analysis):** ${analysis.commonTopics.join(', ')}
+` : ''}**MANDATORY topics — your article MUST cover each of these (competitors rank for these):** ${analysis.commonTopics.join(', ')}
+Each topic must appear as its own H2 or H3 section, or be substantially addressed (3+ sentences) within a related section.
 **Content gaps to fill (unique angles):** ${analysis.gaps.join(', ')}${analysis.topicGaps?.length ? `\n**Topic gaps (NO competitor covers these — high-value differentiation):** ${analysis.topicGaps.join(', ')}` : ''}${analysis.depthGaps?.length ? `\n**Depth gaps (competitors mention but cover shallowly):** ${analysis.depthGaps.join(', ')}` : ''}${analysis.dataGaps?.length ? `\n**Data gaps (specific missing data points):** ${analysis.dataGaps.join(', ')}` : ''}${analysis.entityFrequency?.length ? `\n**Key entities to mention (by competitor frequency):** ${analysis.entityFrequency.slice(0, 8).map(e => `${e.entity} (${e.mentions}x)`).join(', ')}` : ''}${analysis.structuralPatterns?.length ? `\n**Structural patterns to match:** ${analysis.structuralPatterns.join('; ')}` : ''}
 
 **Writing rules:**
 1. Output ONLY clean HTML using these tags: h2, h3, p, ul, ol, li, a, strong, em, blockquote, table, thead, tbody, tr, th, td, img
+1b. When the article includes comparison tables or data sections, add an <img alt="[descriptive alt text about what the image should show]"> placeholder where an infographic would help readers visualize the data. Use specific, descriptive alt text (e.g., alt="Comparison of JFK parking rates by lot type showing daily prices") — never generic alt text like "image" or "parking".
 2. Do NOT use: h1, div, span, inline styles, classes, or IDs
 3. Do NOT include the article title as an h1 — it's handled separately
 4. All internal links use format: ${BLOG_BASE_URL}/[slug]
@@ -376,11 +382,11 @@ GOOD: "The economy lot is the cheapest option at $18/day. It's a 10-minute shutt
 24. E-E-A-T SIGNALS: Use phrases like "based on current rates", "travelers frequently report", "we compared options across providers" to signal expertise and first-hand experience.
 25. BOLD KEY TERMS: Use <strong> to highlight key terms, names, and important phrases throughout the article. This helps AI systems identify the most important concepts for extraction.
 26. ENTITY COVERAGE: Mention related entities thoroughly — terminal names (Terminal 1, Terminal 4, Terminal 8), airline hubs (JetBlue T5, Delta T4), nearby roads (Van Wyck Expressway, Belt Parkway), shuttle services, and neighborhood names (Jamaica, Howard Beach). Entity density helps NLP systems gauge content depth.
-27. FRESHNESS SIGNALS: For things that genuinely change (rates, policies, construction updates), include timeframe references like "as of 2026" or "current rates". Don't add year references to evergreen facts that don't change — it just dates the content unnecessarily.
+27. FRESHNESS SIGNALS: For things that genuinely change (rates, policies, construction updates), include timeframe references like "as of ${new Date().getFullYear()}" or "current rates". Don't add year references to evergreen facts that don't change — it just dates the content unnecessarily.
 28. PARAGRAPH LENGTH: Keep paragraphs to 3-5 sentences (80-120 words). Long enough to develop a point, short enough for AI to parse and extract. Never exceed 5 sentences in a single paragraph.
 29. NO FILLER: Every sentence must contain a fact, a tip, or a specific actionable detail. Remove any sentence that exists just to fill space or transition generically.
 30. COMPARISON TABLES: For pricing data and side-by-side comparisons, use HTML tables (<table>, <thead>, <tbody>, <tr>, <th>, <td>). Tables are especially valuable in data-heavy and comparison style articles. Include at least one table when comparing parking options, rates, or features across providers. CRITICAL: Every row in a parking comparison table MUST use an ACTUAL named facility from the verified data above (e.g., "PARK AC", "ARB Parking", "Bolt Parking"). NEVER use generic categories like "Budget (Jamaica)" or "Premium (Near terminals)" — readers need real lot names they can search for and book.
-31. VERIFICATION DATES: When citing promo codes, specific rates, or time-sensitive facts, add "(verified [Month Year])" inline — e.g., "The early bird rate is $18/day (verified February 2026)." This builds trust and signals freshness.
+31. VERIFICATION DATES: When citing promo codes, specific rates, or time-sensitive facts, add "(verified [Month Year])" inline — e.g., "The early bird rate is $18/day (verified ${new Date().toLocaleString('en-US', { month: 'long' })} ${new Date().getFullYear()})." This builds trust and signals freshness.
 32. PAA TARGETS: Include 2-3 "People Also Ask" style questions as H2 or H3 headings, targeting common related queries that searchers ask about this topic. For example, if writing about JFK parking deals, include headings like "Is There Free Parking at JFK?" or "How Early Should I Book JFK Parking?"
 Respond with ONLY valid JSON in this exact format:
 {

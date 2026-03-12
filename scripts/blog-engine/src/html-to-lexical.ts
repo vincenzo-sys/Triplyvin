@@ -466,6 +466,10 @@ function convertBlockElement(el: HTMLElement): LexicalNode[] {
       const imgEl = el.querySelector('img')
       if (imgEl) {
         const id = imgEl.getAttribute('data-media-id') || ''
+        if (!id || isNaN(parseInt(id, 10))) {
+          // Skip placeholder figures without a valid media ID
+          return convertChildBlocks(el)
+        }
         const src = imgEl.getAttribute('src') || ''
         const alt = imgEl.getAttribute('alt') || ''
         const width = parseInt(imgEl.getAttribute('data-width') || imgEl.getAttribute('width') || '0', 10)
@@ -485,8 +489,12 @@ function convertBlockElement(el: HTMLElement): LexicalNode[] {
 
     case 'img': {
       // Convert <img> to Lexical upload node
-      // data-media-id and data-width/data-height are set by the inline-images resolver
+      // data-media-id and data-width/data-height are set by the infographics/inline-images resolver
       const id = el.getAttribute('data-media-id') || ''
+      if (!id || isNaN(parseInt(id, 10))) {
+        // Skip placeholder <img> tags without a valid media ID (writer puts these as hints for infographics)
+        return []
+      }
       const src = el.getAttribute('src') || ''
       const alt = el.getAttribute('alt') || ''
       const width = parseInt(el.getAttribute('data-width') || el.getAttribute('width') || '0', 10)

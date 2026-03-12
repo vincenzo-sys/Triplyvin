@@ -74,7 +74,7 @@ export function buildEditPrompt(html: string, keyword: string, articleType: stri
 - Content gaps to cover: ${analysis.gaps.join(', ')}
 - Common topics across competitors: ${analysis.commonTopics.join(', ')}${analysis.competitorBenchmarks ? `
 - Competitor benchmarks: ~${analysis.competitorBenchmarks.avgWordCount} words, ~${analysis.competitorBenchmarks.avgH2Count} H2s, ~${analysis.competitorBenchmarks.avgListCount} lists, ~${analysis.competitorBenchmarks.avgTableCount} tables` : ''}
-Verify this article covers the identified gaps. If a recommended H2 topic is entirely missing, add a section for it.\n`
+MANDATORY: Check every recommended H2 below against the article. If ANY recommended topic is entirely missing, you MUST add a section for it. If a common topic is mentioned only in passing (1-2 sentences), expand it to a full subsection. This is the #1 reason articles fail to rank — missing the topics competitors cover.\n`
     : ''
 
   const airportDataSection = airportData
@@ -118,10 +118,10 @@ ${html}
 14. BOLD KEY TERMS — important terms, names, and key phrases should use <strong>. If key terms are plain text, bold them. Don't over-bold — 2-4 bolded terms per section is ideal.
 15. PARAGRAPH & SENTENCE LENGTH — paragraphs should be 3-5 sentences (80-120 words). Split any paragraph longer than 5 sentences. ALSO check individual sentences: if any sentence exceeds 25 words, split it. Rewrite compound sentences (those with semicolons, multiple commas, or "which/that" chains) as two shorter sentences. Target an 8th-grade reading level.
 16. NO FILLER — remove any sentence that doesn't contain a fact, tip, or specific useful detail. Cut generic transitions like "Let's dive in", "Read on to learn", "In this guide we'll cover".
-17. E-E-A-T LANGUAGE — ensure the article uses credibility phrases like "based on current rates", "according to airport data", "travelers report", "as of 2026". Remove any generic claims without grounding.
-18. FRESHNESS — for rates, policies, and construction updates, ensure timeframe references ("as of 2026", "current rates"). Don't add year references to evergreen facts. Remove any outdated year references (2024, 2023, etc.).
+17. E-E-A-T LANGUAGE — ensure the article uses credibility phrases like "based on current rates", "according to airport data", "travelers report", "as of ${new Date().getFullYear()}". Remove any generic claims without grounding.
+18. FRESHNESS — for rates, policies, and construction updates, ensure timeframe references ("as of ${new Date().getFullYear()}", "current rates"). Don't add year references to evergreen facts. Remove any year references older than ${new Date().getFullYear() - 1}.
 19. COMPARISON TABLES — if the article compares parking options, rates, or features across providers, verify it contains at least one HTML <table>. If comparison data is buried in prose or lists, convert it to a table for better scannability and featured-snippet eligibility. CRITICAL: Every row in a parking table MUST use a REAL named facility from the verified data (e.g., "PARK AC", "ARB Parking", "Bolt Parking"). If the table uses generic categories like "Budget (Jamaica)" or "Premium (Near terminals)", replace them with actual lot names and verified rates. Readers need real names they can search for and book.
-20. VERIFICATION DATES — check that time-sensitive claims (promo codes, specific rates, shuttle schedules, construction timelines) include a verification date like "(verified February 2026)" or "as of 2026". Add one if missing.
+20. VERIFICATION DATES — check that time-sensitive claims (promo codes, specific rates, shuttle schedules, construction timelines) include a verification date like "(verified ${new Date().toLocaleString('en-US', { month: 'long' })} ${new Date().getFullYear()})" or "as of ${new Date().getFullYear()}". Add one if missing.
 21. TABLE PRESENCE — for data-heavy or comparison style articles, ensure at least one HTML table exists. If the article has pricing data presented only in lists, restructure the most data-dense comparison into a table.
 
 Respond with ONLY valid JSON in this exact format:

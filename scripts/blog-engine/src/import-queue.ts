@@ -188,7 +188,7 @@ async function main() {
     // Build the queue item
     const item: Record<string, unknown> = {
       keyword: row['Keyword'] || '',
-      suggestedTitle: row['Title'] || '',  // Empty = let AI generate title
+      // Title is NOT an input — the AI generates it after competitive analysis
       airportCode: row['Airport'] || 'JFK',
       slug,
       articleType,

@@ -35,13 +35,13 @@ interface ScorerInput {
   articleType: 'hub' | 'sub-pillar' | 'spoke'
   articleStyle?: 'standard' | 'narrative' | 'listicle' | 'data-heavy' | 'comparison'
   targetWords: number
-  hasImage: boolean
-  imageAlt: string | null
   airportCode?: string       // For topical authority link validation
   parentSlug?: string | null // For topical authority link validation
   hubSlug?: string | null    // For topical authority link validation
   earlyCta?: string          // For CTA relevance check
   closingCta?: string        // For CTA relevance check
+  recommendedH2s?: string[]  // From competitor analysis
+  commonTopics?: string[]    // From competitor analysis
 }
 
 interface Check {
@@ -389,14 +389,25 @@ function scoreContentStructure(input: ScorerInput, root: HTMLElement, fullText: 
     detail: `${externalLinks.length} external link(s) found (need 1+)`,
   })
 
-  // 6. Featured image with alt text (2 pts) — Rank Math + Yoast
-  const imgPass = input.hasImage && !!input.imageAlt
+  // 6. Image SEO — check actual <img> tags in HTML (4 pts)
+  const images = getAllElements(root, 'img')
+  const imagesWithAlt = images.filter(img => {
+    const alt = img.getAttribute('alt')?.trim()
+    return alt && alt.length > 5
+  })
+  const altRatio = images.length > 0 ? imagesWithAlt.length / images.length : 0
+  const imgPoints = images.length === 0 ? 0
+    : altRatio >= 0.8 ? 4
+    : altRatio >= 0.5 ? 3
+    : 2
   checks.push({
-    name: 'Featured image with alt text',
-    passed: imgPass,
-    points: input.hasImage ? (input.imageAlt ? 2 : 1) : 0,
-    maxPoints: 2,
-    detail: imgPass ? `Image uploaded with alt: "${input.imageAlt?.slice(0, 50)}..."` : input.hasImage ? 'Image uploaded but missing alt text' : 'No featured image',
+    name: 'Image SEO',
+    passed: images.length > 0 && altRatio >= 0.8,
+    points: imgPoints,
+    maxPoints: 4,
+    detail: images.length === 0
+      ? 'No images found in HTML'
+      : `${images.length} image(s), ${imagesWithAlt.length} with good alt text (${Math.round(altRatio * 100)}%)`,
   })
 
   // 7. Meta title length (2 pts) — Yoast (under 60 chars)
@@ -678,20 +689,33 @@ function scoreContentQuality(input: ScorerInput, root: HTMLElement, fullText: st
     detail: `${entityCount} of ${entityPatterns.length} entity categories found (target: 4+)`,
   })
 
-  // 4. Freshness signals for rates/policies (2 pts) — Increased: need 3+ references (was 1)
+  // 4. Freshness signals for rates/policies (4 pts) — dynamic year-aware
+  const currentYear = new Date().getFullYear()
   const freshnessPatterns = [
-    /as of 202[4-9]/i, /current rates/i, /current pricing/i, /this year/i,
-    /202[5-9] rates/i, /updated/i, /recently/i, /latest/i, /this month/i,
+    new RegExp(`as of ${currentYear}`, 'i'),
+    new RegExp(`as of ${currentYear - 1}`, 'i'),
+    new RegExp(`${currentYear}\\s*(rates|prices|pricing|fees|costs)`, 'i'),
+    /current rates/i, /current pricing/i, /this year/i,
+    /updated/i, /recently/i, /latest/i, /this month/i,
     /winter|spring|summer|fall|holiday season/i,
   ]
   const freshnessCount = freshnessPatterns.filter((p) => p.test(fullText)).length
-  const freshnessPass = freshnessCount >= 3
+  const yearMentions = [...fullText.matchAll(/\b(20[2-9]\d)\b/g)].map(m => parseInt(m[1]))
+  const hasCurrentYear = yearMentions.includes(currentYear)
+  const hasStaleYears = yearMentions.some(y => y < currentYear - 1)
+  const hasOnlyStaleYears = yearMentions.length > 0 && !hasCurrentYear && hasStaleYears
+  const freshnessPoints = freshnessCount >= 3 && hasCurrentYear && !hasOnlyStaleYears ? 4
+    : freshnessCount >= 3 && (hasCurrentYear || !hasStaleYears) ? 3
+    : freshnessCount >= 2 ? 2
+    : freshnessCount >= 1 ? 1
+    : 0
+  const freshnessPass = freshnessPoints >= 3
   checks.push({
     name: 'Freshness signals',
     passed: freshnessPass,
-    points: freshnessCount >= 3 ? 2 : freshnessCount >= 1 ? 1 : 0,
-    maxPoints: 2,
-    detail: `${freshnessCount} freshness references found (target: 3+)`,
+    points: freshnessPoints,
+    maxPoints: 4,
+    detail: `${freshnessCount} freshness references found${hasCurrentYear ? `, mentions ${currentYear}` : ''}${hasStaleYears ? `, has stale years` : ''} (target: 3+ refs with current year)`,
   })
 
   // 5. Engaging title — power words (1 pt) — Rank Math
@@ -964,6 +988,84 @@ function scoreCtaRelevance(input: ScorerInput): CategoryScore {
   return { name: 'CTA Quality', points, maxPoints, checks }
 }
 
+// ── Search Intent Match ──────────────────────────────────────────────────────
+
+function scoreSearchIntentMatch(input: ScorerInput, root: HTMLElement, fullText: string): CategoryScore {
+  const checks: Check[] = []
+
+  // Helper: extract significant words (>3 chars) from a string
+  const significantWords = (s: string) =>
+    s.toLowerCase().split(/\s+/).filter(w => w.length > 3 && !/^(that|this|with|from|your|have|will|been|were|they|them|than|each|into|also|more|most|some|very|just|only)$/.test(w))
+
+  // 1. H2 Topic Coverage (4 pts) — fuzzy-match actual H2s against recommendedH2s
+  const h2s = getAllElements(root, 'h2')
+  const h2Texts = h2s.map(h => getTextContent(h).toLowerCase())
+
+  if (input.recommendedH2s && input.recommendedH2s.length > 0) {
+    let matched = 0
+    for (const rec of input.recommendedH2s) {
+      const recWords = significantWords(rec)
+      if (recWords.length === 0) { matched++; continue }
+      const isMatched = h2Texts.some(h2 => {
+        const h2Words = significantWords(h2)
+        const overlap = recWords.filter(w => h2Words.some(hw => hw.includes(w) || w.includes(hw)))
+        return overlap.length / recWords.length >= 0.5
+      })
+      if (isMatched) matched++
+    }
+    const ratio = matched / input.recommendedH2s.length
+    const pts = ratio >= 0.7 ? 4 : ratio >= 0.5 ? 3 : ratio >= 0.25 ? 1 : 0
+    checks.push({
+      name: 'H2 topic coverage',
+      passed: pts >= 3,
+      points: pts,
+      maxPoints: 4,
+      detail: `${matched}/${input.recommendedH2s.length} recommended H2s matched in article (${Math.round(ratio * 100)}%, target: 70%+)`,
+    })
+  } else {
+    checks.push({
+      name: 'H2 topic coverage',
+      passed: true,
+      points: 2,
+      maxPoints: 4,
+      detail: 'No recommended H2 data available — neutral score',
+    })
+  }
+
+  // 2. Common Topic Coverage (4 pts) — check if each commonTopics entry appears in fullText
+  if (input.commonTopics && input.commonTopics.length > 0) {
+    const textLower = fullText.toLowerCase()
+    let found = 0
+    for (const topic of input.commonTopics) {
+      const words = significantWords(topic)
+      if (words.length === 0) { found++; continue }
+      const wordHits = words.filter(w => textLower.includes(w))
+      if (wordHits.length / words.length >= 0.5) found++
+    }
+    const ratio = found / input.commonTopics.length
+    const pts = ratio >= 0.8 ? 4 : ratio >= 0.6 ? 3 : ratio >= 0.4 ? 1 : 0
+    checks.push({
+      name: 'Common topic coverage',
+      passed: pts >= 3,
+      points: pts,
+      maxPoints: 4,
+      detail: `${found}/${input.commonTopics.length} common topics found in article text (${Math.round(ratio * 100)}%, target: 80%+)`,
+    })
+  } else {
+    checks.push({
+      name: 'Common topic coverage',
+      passed: true,
+      points: 2,
+      maxPoints: 4,
+      detail: 'No common topics data available — neutral score',
+    })
+  }
+
+  const points = checks.reduce((sum, c) => sum + c.points, 0)
+  const maxPoints = checks.reduce((sum, c) => sum + c.maxPoints, 0)
+  return { name: 'Search Intent Match', points, maxPoints, checks }
+}
+
 // ── Main Scorer ─────────────────────────────────────────────────────────────
 
 export function scoreArticle(input: ScorerInput): SeoScore {
@@ -978,11 +1080,13 @@ export function scoreArticle(input: ScorerInput): SeoScore {
     scoreStyleAdherence(input, root, fullText),
     scoreExternalLinkValidation(input, root),
     scoreCtaRelevance(input),
+    scoreSearchIntentMatch(input, root, fullText),
   ]
 
   const total = categories.reduce((sum, c) => sum + c.points, 0)
   const maxTotal = categories.reduce((sum, c) => sum + c.maxPoints, 0)
-  const grade = gradeFromScore(total)
+  const pct = maxTotal > 0 ? Math.round((total / maxTotal) * 100) : 0
+  const grade = gradeFromScore(pct)
 
   return { total, maxTotal, grade, categories }
 }

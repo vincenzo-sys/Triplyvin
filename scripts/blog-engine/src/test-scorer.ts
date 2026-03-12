@@ -97,8 +97,6 @@ const score = scoreArticle({
   ],
   articleType: 'hub',
   targetWords: 2500,
-  hasImage: true,
-  imageAlt: 'Aerial view of JFK airport parking lots — Photo by Josh Withers on Unsplash',
 })
 
 printSeoScore(score)

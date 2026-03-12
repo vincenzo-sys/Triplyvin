@@ -19,47 +19,37 @@ import {
   getApiUser,
   getQueueItems,
   getAllPublishedSlugs,
-  updateQueueItem,
 } from './payload.js'
 import { env } from './config.js'
 import { loadAirportData } from './airport-data.js'
 import { scoreArticle, printSeoScore } from './seo-scorer.js'
 import type { SeoScore } from './seo-scorer.js'
 import { lexicalToHtml } from './lexical-to-html.js'
-import { generateTopicalMap, topicalMapToQueueEntries, printTopicalMap, saveTopicalMap } from './topical-map.js'
 import { bootstrapAirport, verifyUrls, saveBootstrapData, printBootstrapSummary } from './bootstrap-airport.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const logsDir = path.resolve(__dirname, '..', 'logs')
+const articlesDir = path.resolve(__dirname, '..', 'articles')
 
-interface ArticleReport {
+// ── Article Data — persistent per-slug file that accumulates across runs ──
+
+interface CompetitorSnapshot {
+  url: string
+  title: string
+  wordCount: number
+  h2Count: number
+  listCount: number
+  tableCount: number
+  linkCount: number
+  faqCount: number
+  headings: { level: number; text: string }[]
+  schemaTypes: string[]
+  outboundLinks: { href: string; anchor: string }[]
+  ctaPatterns: string[]
+}
+
+interface GenerationRun {
   timestamp: string
   queueItemId: string
-  title: string
-  slug: string
-  keyword: string
-  articleType: string
-  airportCode: string
-  priority: string
-  scraping: {
-    searchedKeyword: string
-    urlsFound: number
-    urlsScraped: number
-    urlsFailed: number
-    articles: {
-      url: string
-      title: string
-      headingsFound: number
-      status: 'success' | 'failed'
-    }[]
-  }
-  analysis: {
-    commonTopics: string[]
-    contentGaps: string[]
-    recommendedH2s: string[]
-    faqQuestions: string[]
-    suggestedTags: string[]
-  }
   article: {
     htmlLength: number
     estimatedWordCount: number
@@ -74,9 +64,7 @@ interface ArticleReport {
     qualityScore: number
     changes: string[]
   }
-  infographics: {
-    count: number
-  }
+  infographics: { count: number }
   image: {
     found: boolean
     filename: string | null
@@ -98,104 +86,166 @@ interface ArticleReport {
     uploadSeconds: number
   }
   seoScore: SeoScore | null
-  revision: {
-    triggered: boolean
-    scoreBefore: number
-    scoreAfter: number
-    failedChecks: string[]
-  } | null
+  failedChecks: string[]
   error: string | null
 }
 
-function saveReport(report: ArticleReport) {
-  if (!fs.existsSync(logsDir)) {
-    fs.mkdirSync(logsDir, { recursive: true })
+interface ArticleData {
+  // Identity — never changes
+  slug: string
+  keyword: string
+  airportCode: string
+  articleType: string
+  priority: string
+
+  // Latest title (updated each run)
+  title: string
+
+  // Competitor research — replaced each run with fresh data
+  competitors: {
+    scrapedAt: string
+    searchedKeyword: string
+    articles: CompetitorSnapshot[]
   }
 
-  const date = new Date().toISOString().slice(0, 10)
-  const safeSlug = report.slug.slice(0, 50)
-  const filename = `${date}_${safeSlug}.json`
-  const filepath = path.join(logsDir, filename)
+  // AI analysis — replaced each run with fresh analysis
+  analysis: {
+    analyzedAt: string
+    commonTopics: string[]
+    contentGaps: string[]
+    topicGaps: string[]
+    depthGaps: string[]
+    dataGaps: string[]
+    entityGaps: string[]
+    entityFrequency: { entity: string; mentions: number }[]
+    structuralPatterns: string[]
+    contentFormats: string[]
+    recommendedH2s: string[]
+    faqQuestions: string[]
+    suggestedTags: string[]
+    competitorBenchmarks: {
+      avgWordCount: number
+      avgH2Count: number
+      avgListCount: number
+      avgTableCount: number
+      avgLinkCount: number
+    } | null
+  }
 
-  fs.writeFileSync(filepath, JSON.stringify(report, null, 2))
+  // Generation history — each run appended
+  runs: GenerationRun[]
+
+  // Latest score + checks (convenience — also in runs)
+  latestScore: number | null
+  latestGrade: string | null
+  latestFailedChecks: string[]
+}
+
+function loadArticleData(slug: string): ArticleData | null {
+  const filepath = path.join(articlesDir, `${slug}.json`)
+  if (fs.existsSync(filepath)) {
+    return JSON.parse(fs.readFileSync(filepath, 'utf-8'))
+  }
+  return null
+}
+
+function saveArticleData(data: ArticleData): string {
+  if (!fs.existsSync(articlesDir)) {
+    fs.mkdirSync(articlesDir, { recursive: true })
+  }
+  const filepath = path.join(articlesDir, `${data.slug}.json`)
+  fs.writeFileSync(filepath, JSON.stringify(data, null, 2))
   return filepath
 }
 
-function printReport(report: ArticleReport) {
+function printArticleReport(data: ArticleData, run: GenerationRun) {
   console.log('\n  ┌──────────────────────────────────────────────────┐')
   console.log('  │              GENERATION REPORT                   │')
   console.log('  └──────────────────────────────────────────────────┘')
 
-  console.log(`\n  Article: ${report.title}`)
-  console.log(`  Slug: ${report.slug}`)
-  console.log(`  Type: ${report.articleType} | Airport: ${report.airportCode} | Priority: ${report.priority}`)
+  console.log(`\n  Article: ${data.title}`)
+  console.log(`  Slug: ${data.slug}`)
+  console.log(`  Type: ${data.articleType} | Airport: ${data.airportCode} | Priority: ${data.priority}`)
+  console.log(`  Run #${data.runs.length} | ${run.timestamp}`)
 
-  console.log(`\n  SCRAPING:`)
-  console.log(`    Keyword searched: "${report.scraping.searchedKeyword}"`)
-  console.log(`    URLs found: ${report.scraping.urlsFound} | Scraped: ${report.scraping.urlsScraped} | Failed: ${report.scraping.urlsFailed}`)
-  for (const a of report.scraping.articles) {
-    const icon = a.status === 'success' ? '✓' : '✗'
-    console.log(`    ${icon} ${a.title || a.url} (${a.headingsFound} headings)`)
+  console.log(`\n  COMPETITORS (${data.competitors.articles.length} scraped):`)
+  for (const a of data.competitors.articles) {
+    console.log(`    ✓ ${a.title || a.url} — ${a.wordCount} words, ${a.h2Count} H2s, ${a.tableCount} tables`)
   }
 
   console.log(`\n  ANALYSIS:`)
-  console.log(`    Common topics: ${report.analysis.commonTopics.join(', ')}`)
-  console.log(`    Content gaps: ${report.analysis.contentGaps.join(', ')}`)
-  console.log(`    Recommended H2s: ${report.analysis.recommendedH2s.length}`)
-  console.log(`    FAQ questions: ${report.analysis.faqQuestions.length}`)
-  console.log(`    Tags: ${report.analysis.suggestedTags.join(', ')}`)
+  console.log(`    Common topics: ${data.analysis.commonTopics.join(', ')}`)
+  console.log(`    Content gaps: ${data.analysis.contentGaps.join(', ')}`)
+  if (data.analysis.topicGaps.length > 0) console.log(`    Topic gaps (no competitor covers): ${data.analysis.topicGaps.join(', ')}`)
+  if (data.analysis.depthGaps.length > 0) console.log(`    Depth gaps (shallow coverage): ${data.analysis.depthGaps.join(', ')}`)
+  if (data.analysis.dataGaps.length > 0) console.log(`    Data gaps (missing data points): ${data.analysis.dataGaps.join(', ')}`)
+  if (data.analysis.entityGaps.length > 0) console.log(`    Entity gaps (missing entities): ${data.analysis.entityGaps.join(', ')}`)
+  if (data.analysis.entityFrequency.length > 0) console.log(`    Top entities: ${data.analysis.entityFrequency.slice(0, 8).map(e => `${e.entity} (${e.mentions}x)`).join(', ')}`)
+  if (data.analysis.structuralPatterns.length > 0) console.log(`    Structural patterns: ${data.analysis.structuralPatterns.join('; ')}`)
+  console.log(`    Recommended H2s: ${data.analysis.recommendedH2s.length}`)
+  console.log(`    FAQ questions: ${data.analysis.faqQuestions.length}`)
+  console.log(`    Tags: ${data.analysis.suggestedTags.join(', ')}`)
+  if (data.analysis.competitorBenchmarks) {
+    const b = data.analysis.competitorBenchmarks
+    console.log(`    Competitor benchmarks: ~${b.avgWordCount} words, ~${b.avgH2Count} H2s, ~${b.avgListCount} lists, ~${b.avgTableCount} tables, ~${b.avgLinkCount} links`)
+  }
 
   console.log(`\n  ARTICLE:`)
-  console.log(`    HTML length: ${report.article.htmlLength.toLocaleString()} chars`)
-  console.log(`    Est. word count: ~${report.article.estimatedWordCount.toLocaleString()}`)
-  console.log(`    FAQs: ${report.article.faqCount}`)
-  console.log(`    Meta title: ${report.article.metaTitle}`)
-  console.log(`    Category: ${report.article.suggestedCategory}`)
+  console.log(`    HTML length: ${run.article.htmlLength.toLocaleString()} chars`)
+  console.log(`    Est. word count: ~${run.article.estimatedWordCount.toLocaleString()}`)
+  console.log(`    FAQs: ${run.article.faqCount}`)
+  console.log(`    Meta title: ${run.article.metaTitle}`)
+  console.log(`    Category: ${run.article.suggestedCategory}`)
 
   console.log(`\n  EDITING:`)
-  console.log(`    Quality score: ${report.editing.qualityScore}/100`)
-  console.log(`    Changes made: ${report.editing.changesCount}`)
-  for (const c of report.editing.changes.slice(0, 5)) {
+  console.log(`    Quality score: ${run.editing.qualityScore}/100`)
+  console.log(`    Changes made: ${run.editing.changesCount}`)
+  for (const c of run.editing.changes.slice(0, 5)) {
     console.log(`    - ${c}`)
   }
-  if (report.editing.changes.length > 5) {
-    console.log(`    ... and ${report.editing.changes.length - 5} more`)
+  if (run.editing.changes.length > 5) {
+    console.log(`    ... and ${run.editing.changes.length - 5} more`)
   }
 
-  if (report.revision) {
-    console.log(`\n  REVISION:`)
-    console.log(`    Triggered: ${report.revision.triggered ? 'Yes' : 'No'}`)
-    if (report.revision.triggered) {
-      console.log(`    Score before: ${report.revision.scoreBefore}`)
-      console.log(`    Score after: ${report.revision.scoreAfter}`)
-      console.log(`    Improvement: ${report.revision.scoreAfter - report.revision.scoreBefore >= 0 ? '+' : ''}${report.revision.scoreAfter - report.revision.scoreBefore} points`)
-      console.log(`    Failed checks addressed: ${report.revision.failedChecks.length}`)
+  if (run.failedChecks.length > 0) {
+    console.log(`\n  FAILED CHECKS (${run.failedChecks.length}):`)
+    for (const check of run.failedChecks) {
+      console.log(`    ✗ ${check}`)
     }
   }
 
   console.log(`\n  INFOGRAPHICS:`)
-  console.log(`    Generated: ${report.infographics.count}`)
+  console.log(`    Generated: ${run.infographics.count}`)
 
   console.log(`\n  IMAGE:`)
-  if (report.image.found) {
-    console.log(`    File: ${report.image.filename}`)
-    console.log(`    Alt: ${report.image.alt}`)
-    console.log(`    Media ID: ${report.image.mediaId}`)
+  if (run.image.found) {
+    console.log(`    File: ${run.image.filename}`)
+    console.log(`    Alt: ${run.image.alt}`)
+    console.log(`    Media ID: ${run.image.mediaId}`)
   } else {
     console.log(`    No image uploaded`)
   }
 
   console.log(`\n  POST:`)
-  console.log(`    Post ID: ${report.post.postId}`)
-  console.log(`    Status: ${report.post.status}`)
-  console.log(`    Category: ${report.post.categoryCreated}`)
-  console.log(`    Tags: ${report.post.tagsCreated.join(', ')}`)
+  console.log(`    Post ID: ${run.post.postId}`)
+  console.log(`    Status: ${run.post.status}`)
+  console.log(`    Category: ${run.post.categoryCreated}`)
+  console.log(`    Tags: ${run.post.tagsCreated.join(', ')}`)
 
   console.log(`\n  TIMING:`)
-  console.log(`    Total: ${report.timing.totalSeconds}s`)
-  console.log(`    Scraping: ${report.timing.scrapeSeconds}s | Analyze: ${report.timing.analyzeSeconds}s`)
-  console.log(`    Write: ${report.timing.writeSeconds}s | Edit: ${report.timing.editSeconds}s`)
-  console.log(`    Upload: ${report.timing.uploadSeconds}s`)
+  console.log(`    Total: ${run.timing.totalSeconds}s`)
+  console.log(`    Scraping: ${run.timing.scrapeSeconds}s | Analyze: ${run.timing.analyzeSeconds}s`)
+  console.log(`    Write: ${run.timing.writeSeconds}s | Edit: ${run.timing.editSeconds}s`)
+  console.log(`    Upload: ${run.timing.uploadSeconds}s`)
+
+  if (data.runs.length > 1) {
+    console.log(`\n  HISTORY (${data.runs.length} runs):`)
+    for (const r of data.runs) {
+      const score = r.seoScore ? `${r.seoScore.total}/${r.seoScore.maxTotal} (${r.seoScore.grade})` : 'N/A'
+      const err = r.error ? ` — ERROR: ${r.error.slice(0, 60)}` : ''
+      console.log(`    ${r.timestamp} — Score: ${score} | ~${r.article.estimatedWordCount} words${err}`)
+    }
+  }
 }
 
 const program = new Command()
@@ -238,7 +288,7 @@ program
       }
 
       for (const item of items) {
-        console.log(`\n━━━ Processing: ${item.suggestedTitle || item.keyword} ━━━`)
+        console.log(`\n━━━ Processing: "${item.keyword}" ━━━`)
         console.log(`  Type: ${item.articleType} | Airport: ${item.airportCode} | Priority: ${item.priority}`)
 
         // Validate prerequisites
@@ -253,18 +303,26 @@ program
           continue
         }
 
-        // Initialize report
-        const report: ArticleReport = {
-          timestamp: new Date().toISOString(),
-          queueItemId: item.id,
-          title: item.suggestedTitle || item.keyword,
+        // Load or create the article data file
+        const articleData: ArticleData = loadArticleData(item.slug) || {
           slug: item.slug,
           keyword: item.keyword,
-          articleType: item.articleType,
           airportCode: item.airportCode,
+          articleType: item.articleType,
           priority: item.priority,
-          scraping: { searchedKeyword: item.keyword, urlsFound: 0, urlsScraped: 0, urlsFailed: 0, articles: [] },
-          analysis: { commonTopics: [], contentGaps: [], recommendedH2s: [], faqQuestions: [], suggestedTags: [] },
+          title: item.keyword, // Updated with AI-generated title after writing
+          competitors: { scrapedAt: '', searchedKeyword: item.keyword, articles: [] },
+          analysis: { analyzedAt: '', commonTopics: [], contentGaps: [], topicGaps: [], depthGaps: [], dataGaps: [], entityGaps: [], entityFrequency: [], structuralPatterns: [], contentFormats: [], recommendedH2s: [], faqQuestions: [], suggestedTags: [], competitorBenchmarks: null },
+          runs: [],
+          latestScore: null,
+          latestGrade: null,
+          latestFailedChecks: [],
+        }
+
+        // Initialize this run
+        const run: GenerationRun = {
+          timestamp: new Date().toISOString(),
+          queueItemId: item.id,
           article: { htmlLength: 0, estimatedWordCount: 0, faqCount: 0, excerpt: '', metaTitle: '', metaDescription: '', suggestedCategory: '' },
           editing: { changesCount: 0, qualityScore: 0, changes: [] },
           infographics: { count: 0 },
@@ -272,7 +330,7 @@ program
           post: { postId: null, status: 'draft', categoryCreated: '', tagsCreated: [] },
           timing: { totalSeconds: 0, scrapeSeconds: 0, analyzeSeconds: 0, writeSeconds: 0, editSeconds: 0, uploadSeconds: 0 },
           seoScore: null,
-          revision: null,
+          failedChecks: [],
           error: null,
         }
 
@@ -282,22 +340,31 @@ program
           // Mark as generating
           await markGenerating(item.id)
 
-          // Scrape competitors
+          // Scrape competitors — store full data
           const scrapeStart = Date.now()
           const manualUrls = item.competitorUrls?.map((c) => c.url) || []
           const competitors = await scrapeCompetitors(item.keyword, manualUrls)
-          report.timing.scrapeSeconds = Math.round((Date.now() - scrapeStart) / 1000)
+          run.timing.scrapeSeconds = Math.round((Date.now() - scrapeStart) / 1000)
 
-          // Populate scraping report
-          report.scraping.urlsFound = competitors.length + (manualUrls.length > 0 ? 0 : 5 - competitors.length)
-          report.scraping.urlsScraped = competitors.length
-          report.scraping.urlsFailed = report.scraping.urlsFound - competitors.length
-          report.scraping.articles = competitors.map((c: ScrapedArticle) => ({
-            url: c.url,
-            title: c.title,
-            headingsFound: c.headings.length,
-            status: 'success' as const,
-          }))
+          // Store full competitor snapshots
+          articleData.competitors = {
+            scrapedAt: new Date().toISOString(),
+            searchedKeyword: item.keyword,
+            articles: competitors.map((c: ScrapedArticle) => ({
+              url: c.url,
+              title: c.title,
+              wordCount: c.wordCount,
+              h2Count: c.h2Count,
+              listCount: c.listCount,
+              tableCount: c.tableCount,
+              linkCount: c.linkCount,
+              faqCount: c.faqCount,
+              headings: c.headings,
+              schemaTypes: c.schemaTypes,
+              outboundLinks: c.outboundLinks.slice(0, 20),
+              ctaPatterns: c.ctaPatterns,
+            })),
+          }
 
           // Load verified airport data (if available)
           const airportData = loadAirportData(item.airportCode)
@@ -314,22 +381,30 @@ program
 
           // Generate with Claude (3-prompt pipeline)
           const result = await generateArticle(item, competitors, (step, data) => {
-            // Callback to capture intermediate results for the report
             const r = data.result as Record<string, unknown>
             if (step === 'analyze') {
-              report.timing.analyzeSeconds = Math.round(data.elapsed / 1000)
-              report.analysis = {
+              run.timing.analyzeSeconds = Math.round(data.elapsed / 1000)
+              articleData.analysis = {
+                analyzedAt: new Date().toISOString(),
                 commonTopics: (r.commonTopics as string[]) || [],
                 contentGaps: (r.gaps as string[]) || [],
+                topicGaps: (r.topicGaps as string[]) || [],
+                depthGaps: (r.depthGaps as string[]) || [],
+                dataGaps: (r.dataGaps as string[]) || [],
+                entityGaps: (r.entityGaps as string[]) || [],
+                entityFrequency: (r.entityFrequency as { entity: string; mentions: number }[]) || [],
+                structuralPatterns: (r.structuralPatterns as string[]) || [],
+                contentFormats: (r.contentFormats as string[]) || [],
                 recommendedH2s: (r.recommendedH2s as string[]) || [],
                 faqQuestions: (r.faqQuestions as string[]) || [],
                 suggestedTags: (r.suggestedTags as string[]) || [],
+                competitorBenchmarks: (r.competitorBenchmarks as { avgWordCount: number; avgH2Count: number; avgListCount: number; avgTableCount: number; avgLinkCount: number }) || null,
               }
             } else if (step === 'write') {
-              report.timing.writeSeconds = Math.round(data.elapsed / 1000)
+              run.timing.writeSeconds = Math.round(data.elapsed / 1000)
             } else if (step === 'edit') {
-              report.timing.editSeconds = Math.round(data.elapsed / 1000)
-              report.editing = {
+              run.timing.editSeconds = Math.round(data.elapsed / 1000)
+              run.editing = {
                 changesCount: (r.changes as string[])?.length || 0,
                 qualityScore: (r.qualityScore as number) || 0,
                 changes: (r.changes as string[]) || [],
@@ -337,17 +412,17 @@ program
             }
           }, airportData || undefined, airportPosts)
 
-          // Capture revision metadata
-          if (result.revision) {
-            report.revision = result.revision
+          // Capture failed checks
+          if (result.failedChecks.length > 0) {
+            run.failedChecks = result.failedChecks
           }
 
-          // Resolve title: AI-generated > spreadsheet > keyword
-          const resolvedTitle = result.title || item.suggestedTitle || item.keyword
-          report.title = resolvedTitle
+          // Title comes from the AI writer — it generates based on keyword + competitive analysis
+          const resolvedTitle = result.title || item.keyword
+          articleData.title = resolvedTitle
 
           // Article stats
-          report.article = {
+          run.article = {
             htmlLength: result.html.length,
             estimatedWordCount: Math.round(result.html.replace(/<[^>]+>/g, ' ').split(/\s+/).length),
             faqCount: result.faqItems.length,
@@ -368,24 +443,24 @@ program
             excerpt: result.excerpt,
             faqItems: result.faqItems,
             articleType: item.articleType as 'hub' | 'sub-pillar' | 'spoke',
-            targetWords: item.targetWords || (item.articleType === 'hub' ? 2500 : item.articleType === 'sub-pillar' ? 1500 : 1000),
-            hasImage: false, // will be updated after image upload
-            imageAlt: null,
+            targetWords: item.targetWords || (item.articleType === 'hub' ? 3500 : item.articleType === 'sub-pillar' ? 2500 : 1000),
             airportCode: item.airportCode,
             parentSlug: item.parentSlug,
             hubSlug: item.hubSlug,
+            recommendedH2s: articleData.analysis.recommendedH2s,
+            commonTopics: articleData.analysis.commonTopics,
           })
-          report.seoScore = seoScore
+          run.seoScore = seoScore
           console.log(`  ✓ SEO Score: ${seoScore.total}/${seoScore.maxTotal} (${seoScore.grade})`)
 
-          // Generate infographics (Claude SVG → resvg PNG → Payload upload)
+          // Generate infographics
           let contentHtml = result.html
           if (airportData) {
             try {
               console.log('  Generating infographics...')
               const infResult = await generateInfographics(contentHtml, airportData, item.airportCode)
               contentHtml = infResult.html
-              report.infographics.count = infResult.count
+              run.infographics.count = infResult.count
               if (infResult.count > 0) {
                 console.log(`  ✓ ${infResult.count} infographic(s) generated`)
               } else {
@@ -408,17 +483,17 @@ program
           if (photo) {
             const media = await uploadMedia(photo.buffer, photo.filename, photo.alt)
             featuredImageId = media.doc?.id || media.id
-            report.image = { found: true, filename: photo.filename, alt: photo.alt, mediaId: featuredImageId }
+            run.image = { found: true, filename: photo.filename, alt: photo.alt, mediaId: featuredImageId }
             console.log(`  ✓ Image uploaded: ${photo.filename}`)
           } else {
             console.log('  ⚠ No image found — post will be created without featured image')
           }
-          report.timing.uploadSeconds = Math.round((Date.now() - uploadStart) / 1000)
+          run.timing.uploadSeconds = Math.round((Date.now() - uploadStart) / 1000)
 
-          // Re-score the image check now that we know if image was uploaded
-          if (report.seoScore) {
-            const imgScore = scoreArticle({
-              html: result.html,
+          // Re-score with post-infographic HTML (contentHtml has infographic images)
+          if (run.seoScore) {
+            run.seoScore = scoreArticle({
+              html: contentHtml,
               keyword: item.keyword,
               slug: item.slug,
               metaTitle: result.metaTitle,
@@ -426,29 +501,27 @@ program
               excerpt: result.excerpt,
               faqItems: result.faqItems,
               articleType: item.articleType as 'hub' | 'sub-pillar' | 'spoke',
-              targetWords: item.targetWords || (item.articleType === 'hub' ? 2500 : item.articleType === 'sub-pillar' ? 1500 : 1000),
-              hasImage: report.image.found,
-              imageAlt: report.image.alt,
+              targetWords: item.targetWords || (item.articleType === 'hub' ? 3500 : item.articleType === 'sub-pillar' ? 2500 : 1000),
               airportCode: item.airportCode,
               parentSlug: item.parentSlug,
               hubSlug: item.hubSlug,
+              recommendedH2s: articleData.analysis.recommendedH2s,
+              commonTopics: articleData.analysis.commonTopics,
             })
-            report.seoScore = imgScore
           }
 
           // Find or create category and tags
           const category = await findOrCreateCategory(result.suggestedCategory)
-          report.post.categoryCreated = result.suggestedCategory
+          run.post.categoryCreated = result.suggestedCategory
           const tagIds: string[] = []
           for (const tagName of result.suggestedTags) {
             const tag = await findOrCreateTag(tagName)
             tagIds.push(tag.doc?.id || tag.id)
-            report.post.tagsCreated.push(tagName)
+            run.post.tagsCreated.push(tagName)
           }
 
-          // Create the post — draft or review based on quality score
-          const postStatus = result.suggestedStatus || 'draft'
-          console.log(`  Creating ${postStatus} post in CMS...`)
+          // Create draft post in CMS
+          console.log('  Creating draft post in CMS...')
           const postData: Record<string, unknown> = {
             title: resolvedTitle,
             slug: item.slug,
@@ -457,7 +530,7 @@ program
             category: category.doc?.id || category.id,
             tags: tagIds,
             author: apiUser.id,
-            status: postStatus,
+            status: 'draft',
             airportCode: item.airportCode,
             articleType: item.articleType,
             parentSlug: item.parentSlug || undefined,
@@ -473,43 +546,50 @@ program
             postData.featuredImage = featuredImageId
           }
 
-          // Include SEO score in post data
-          if (report.seoScore) {
-            postData.seoScore = report.seoScore.total
-            postData.seoScoreDetails = report.seoScore
+          if (run.seoScore) {
+            // CMS field is 0-100; send percentage, not raw points
+            const pct = run.seoScore.maxTotal > 0
+              ? Math.round((run.seoScore.total / run.seoScore.maxTotal) * 100)
+              : 0
+            postData.seoScore = pct
+            postData.seoScoreDetails = run.seoScore
           }
 
           const post = await createPost(postData)
           const postId = post.doc?.id || post.id
-          report.post.postId = postId
+          run.post.postId = postId
 
-          // Update queue item status to match the post
-          if (postStatus === 'review') {
-            await updateQueueItem(item.id, { status: 'review', generatedPost: postId })
-          } else {
-            await markDraft(item.id, postId)
-          }
+          await markDraft(item.id, postId)
 
-          report.timing.totalSeconds = Math.round((Date.now() - totalStart) / 1000)
+          run.timing.totalSeconds = Math.round((Date.now() - totalStart) / 1000)
 
-          console.log(`  ✅ Draft created! SEO Score: ${report.seoScore?.total}/${report.seoScore?.maxTotal} (${report.seoScore?.grade})`)
-          console.log(`  📝 Review at: CMS Admin → Posts → "${resolvedTitle}"`)
+          // Update article data with latest score
+          articleData.latestScore = run.seoScore?.total || null
+          articleData.latestGrade = run.seoScore?.grade || null
+          articleData.latestFailedChecks = run.failedChecks
 
-          // Print reports
-          printReport(report)
-          if (report.seoScore) printSeoScore(report.seoScore)
-          const reportPath = saveReport(report)
-          console.log(`\n  📄 Report saved: ${reportPath}`)
+          // Append this run to history
+          articleData.runs.push(run)
+
+          console.log(`  ✅ Draft created! SEO Score: ${run.seoScore?.total}/${run.seoScore?.maxTotal} (${run.seoScore?.grade})`)
+          console.log(`  📝 Review at: CMS Admin → Posts → "${resolvedTitle}" (keyword: "${item.keyword}")`)
+
+          // Print report and save article data
+          printArticleReport(articleData, run)
+          if (run.seoScore) printSeoScore(run.seoScore)
+          const dataPath = saveArticleData(articleData)
+          console.log(`\n  📄 Article data: ${dataPath}`)
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : String(err)
           console.error(`  ❌ Error: ${errorMsg}`)
-          report.error = errorMsg
-          report.timing.totalSeconds = Math.round((Date.now() - totalStart) / 1000)
+          run.error = errorMsg
+          run.timing.totalSeconds = Math.round((Date.now() - totalStart) / 1000)
           await markError(item.id, errorMsg)
 
-          // Save report even on error
-          const reportPath = saveReport(report)
-          console.log(`  📄 Error report saved: ${reportPath}`)
+          // Save even on error — preserves scrape/analysis data
+          articleData.runs.push(run)
+          const dataPath = saveArticleData(articleData)
+          console.log(`  📄 Article data saved (with error): ${dataPath}`)
         }
       }
 
@@ -561,7 +641,7 @@ program
         console.log(`\n${status.toUpperCase()} (${group.length}):`)
         for (const item of group) {
           const batchTag = item.batch ? ` [${item.batch}]` : ''
-          console.log(`  ${item.priority} | ${item.airportCode} | ${item.articleType.padEnd(11)} | ${item.suggestedTitle || item.keyword}${batchTag}`)
+          console.log(`  ${item.priority} | ${item.airportCode} | ${item.articleType.padEnd(11)} | ${item.keyword}${batchTag}`)
         }
       }
 
@@ -613,7 +693,7 @@ program
       for (const item of items) {
         const postId = typeof item.generatedPost === 'string' ? item.generatedPost : null
         console.log(`  ${item.slug}`)
-        console.log(`    Title: ${item.suggestedTitle || item.keyword}`)
+        console.log(`    Keyword: ${item.keyword}`)
         console.log(`    Status: ${item.status} → published`)
         console.log(`    Post ID: ${postId || 'none'}`)
 
@@ -724,11 +804,10 @@ program
         // Determine target words based on article type
         const articleType = post.articleType || 'spoke'
         const targetWords = queueItem?.targetWords
-          || (articleType === 'hub' ? 2500 : articleType === 'sub-pillar' ? 1500 : 1000)
+          || (articleType === 'hub' ? 3500 : articleType === 'sub-pillar' ? 2500 : 1000)
 
-        // Check for featured image
-        const hasImage = !!post.featuredImage
-        const imageAlt = typeof post.featuredImage === 'object' ? post.featuredImage?.alt : null
+        // Load article data for analysis context (if available)
+        const articleData = loadArticleData(post.slug)
 
         const score = scoreArticle({
           html,
@@ -740,11 +819,11 @@ program
           faqItems: post.faqItems || [],
           articleType: articleType as 'hub' | 'sub-pillar' | 'spoke',
           targetWords,
-          hasImage,
-          imageAlt,
           airportCode: post.airportCode || undefined,
           parentSlug: post.parentSlug || undefined,
           hubSlug: post.hubSlug || undefined,
+          recommendedH2s: articleData?.analysis.recommendedH2s,
+          commonTopics: articleData?.analysis.commonTopics,
         })
 
         printSeoScore(score)
@@ -753,8 +832,9 @@ program
         // Optionally save score to CMS
         if (options.save) {
           try {
-            await updatePost(post.id, { seoScore: score.total, seoScoreDetails: score })
-            console.log(`\n  ✓ Score saved to CMS: ${score.total}/100`)
+            const scorePct = score.maxTotal > 0 ? Math.round((score.total / score.maxTotal) * 100) : 0
+            await updatePost(post.id, { seoScore: scorePct, seoScoreDetails: score })
+            console.log(`\n  ✓ Score saved to CMS: ${scorePct}/100`)
           } catch (err) {
             console.log(`\n  ⚠ Failed to save score: ${err instanceof Error ? err.message : err}`)
           }
@@ -773,79 +853,6 @@ program
         }
         const avg = Math.round(results.reduce((s, r) => s + r.score, 0) / results.length)
         console.log(`\n  Average: ${avg}/100`)
-      }
-
-      console.log('')
-    } catch (err) {
-      console.error('Error:', err)
-      process.exit(1)
-    }
-  })
-
-// Plan command — auto-generate a topical map for an airport
-program
-  .command('plan')
-  .description('Generate a topical map (content cluster) for an airport')
-  .requiredOption('-a, --airport <code>', 'Airport code (e.g., EWR)')
-  .option('--import', 'Import generated topics into CMS content queue')
-  .option('--batch <name>', 'Batch name for imported queue items (default: auto-generated)')
-  .action(async (options) => {
-    try {
-      const code = options.airport.toUpperCase()
-      console.log(`\n📋 Triply Blog Engine — Topical Map Planner\n`)
-      console.log(`Airport: ${code}\n`)
-
-      // Generate the topical map
-      const map = await generateTopicalMap(code)
-
-      // Display the map
-      printTopicalMap(map)
-
-      // Save to file
-      const filepath = saveTopicalMap(map)
-      console.log(`\n  📄 Topical map saved: ${filepath}`)
-
-      // Optionally import into CMS queue
-      if (options.import) {
-        const batch = options.batch || `${code.toLowerCase()}-${new Date().toISOString().slice(0, 10)}`
-        const entries = topicalMapToQueueEntries(map, batch)
-
-        console.log(`\n  Importing ${entries.length} items into CMS queue (batch: ${batch})...`)
-
-        let imported = 0
-        let failed = 0
-
-        for (const entry of entries) {
-          try {
-            const res = await fetch(`${env.PAYLOAD_CMS_URL}/api/content-queue`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `users API-Key ${env.PAYLOAD_API_KEY}`,
-              },
-              body: JSON.stringify(entry),
-            })
-
-            if (!res.ok) {
-              const body = await res.text()
-              throw new Error(`${res.status}: ${body}`)
-            }
-
-            imported++
-            console.log(`    ✓ ${entry.articleType.padEnd(11)} | ${entry.suggestedTitle}`)
-          } catch (err) {
-            failed++
-            const msg = err instanceof Error ? err.message : String(err)
-            console.log(`    ✗ ${entry.suggestedTitle}: ${msg}`)
-          }
-        }
-
-        console.log(`\n  Imported: ${imported} | Failed: ${failed}`)
-        if (imported > 0) {
-          console.log(`  Batch: "${batch}" — use \`npm run generate -- -a ${code}\` to start generating`)
-        }
-      } else {
-        console.log(`\n  💡 Add --import to load these topics into the CMS queue`)
       }
 
       console.log('')
@@ -902,7 +909,7 @@ program
         console.log(`  3. Run with --verify to check all URLs: npm run bootstrap -- -a ${code} --verify`)
       }
       console.log(`  4. Add parkingLots array with off-site lot data`)
-      console.log(`  5. Run npm run plan -- -a ${code} to generate the topical map`)
+      console.log(`  5. Import queue items from your content spreadsheet using: npm run import-queue`)
 
       console.log('')
     } catch (err) {

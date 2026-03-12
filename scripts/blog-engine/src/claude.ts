@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
-import { env, CLAUDE_MODEL, MAX_TOKENS, DOMAIN, REVISION_THRESHOLDS, HARD_FLOOR_SCORE } from './config.js'
+import { env, CLAUDE_MODEL, MAX_TOKENS, DOMAIN } from './config.js'
 import { scoreArticle } from './seo-scorer.js'
 import type { SeoScore } from './seo-scorer.js'
 import { buildAnalyzePrompt } from './prompts/analyze.js'
@@ -208,15 +208,40 @@ function parseJsonResponse<T>(text: string, schema: z.ZodType<T>): T {
     const raw = JSON.parse(jsonStr)
     return schema.parse(raw)
   } catch (firstErr) {
-    // Repair step 1: Replace literal control characters (U+0000–U+001F)
-    let repaired = jsonStr.replace(/[\x00-\x1f]/g, (ch) => {
-      switch (ch) {
-        case '\n': return '\\n'
-        case '\r': return '\\r'
-        case '\t': return '\\t'
-        default: return ''
+    // Repair step 1: Replace literal control characters ONLY inside JSON string values.
+    // Walk the string tracking whether we're inside a quoted value to avoid breaking
+    // structural whitespace (newlines between JSON properties).
+    let repaired = ''
+    let inString = false
+    let escaped = false
+    for (let i = 0; i < jsonStr.length; i++) {
+      const ch = jsonStr[i]
+      if (escaped) {
+        repaired += ch
+        escaped = false
+        continue
       }
-    })
+      if (ch === '\\' && inString) {
+        repaired += ch
+        escaped = true
+        continue
+      }
+      if (ch === '"') {
+        inString = !inString
+        repaired += ch
+        continue
+      }
+      if (inString && ch.charCodeAt(0) >= 0 && ch.charCodeAt(0) <= 0x1f) {
+        switch (ch) {
+          case '\n': repaired += '\\n'; break
+          case '\r': repaired += '\\r'; break
+          case '\t': repaired += '\\t'; break
+          default: break // strip other control chars
+        }
+        continue
+      }
+      repaired += ch
+    }
 
     // Repair step 2: Fix unescaped double quotes inside ALL JSON string values.
     // Claude often outputs HTML with literal "quotes" inside JSON strings.
@@ -407,13 +432,8 @@ export async function generateArticle(
   suggestedCategory: string
   suggestedTags: string[]
   qualityScore: number
-  revision?: {
-    triggered: boolean
-    scoreBefore: number
-    scoreAfter: number
-    failedChecks: string[]
-  }
-  suggestedStatus: 'draft' | 'review'
+  failedChecks: string[]
+  suggestedStatus: 'draft'
 }> {
   // Step 1: Analyze competitors
   const analyzeStart = Date.now()
@@ -450,23 +470,8 @@ export async function generateArticle(
   let editResult = await editArticle(writeResult.html, item.keyword, item.articleType, item.articleStyle, item.airportCode, publishedPosts, undefined, analysisContext, airportData)
   onStep?.('edit', { elapsed: Date.now() - editStart, result: editResult as unknown as Record<string, unknown> })
 
-  // Step 3b: Auto-revision loop — score and re-edit if below threshold
-  let revisionMeta: { triggered: boolean; scoreBefore: number; scoreAfter: number; failedChecks: string[] } | undefined
-
-  // Validate CTAs and collect issues
-  const ctaIssues = [
-    ...validateCta('earlyCta', writeResult.earlyCta, item.airportCode, item.keyword),
-    ...validateCta('closingCta', writeResult.closingCta, item.airportCode, item.keyword),
-  ]
-  // Check CTAs are different
-  if (writeResult.earlyCta && writeResult.closingCta && writeResult.earlyCta === writeResult.closingCta) {
-    const msg = 'CTAs: Early and closing CTAs are identical — they should be different'
-    console.warn(`  ⚠ ${msg}`)
-    ctaIssues.push(msg)
-  }
-
   // Score the edited article
-  const targetWords = item.targetWords || (item.articleType === 'hub' ? 2500 : item.articleType === 'sub-pillar' ? 1500 : 1000)
+  const targetWords = item.targetWords || (item.articleType === 'hub' ? 3500 : item.articleType === 'sub-pillar' ? 2500 : 1000)
   const scorerBase = {
     keyword: item.keyword,
     slug: item.slug,
@@ -486,59 +491,40 @@ export async function generateArticle(
     closingCta: writeResult.closingCta,
   }
 
-  const firstScore = scoreArticle({ html: editResult.html, ...scorerBase })
+  const seoScore = scoreArticle({ html: editResult.html, ...scorerBase })
+  console.log(`  ✓ SEO score: ${seoScore.total}/${seoScore.maxTotal} (${seoScore.grade})`)
 
-  console.log(`  ✓ Initial SEO score: ${firstScore.total}/${firstScore.maxTotal} (${firstScore.grade})`)
+  // Validate CTAs and collect issues
+  const ctaIssues = [
+    ...validateCta('earlyCta', writeResult.earlyCta, item.airportCode, item.keyword),
+    ...validateCta('closingCta', writeResult.closingCta, item.airportCode, item.keyword),
+  ]
+  if (writeResult.earlyCta && writeResult.closingCta && writeResult.earlyCta === writeResult.closingCta) {
+    const msg = 'CTAs: Early and closing CTAs are identical — they should be different'
+    console.warn(`  ⚠ ${msg}`)
+    ctaIssues.push(msg)
+  }
 
-  // Collect failed checks for revision
+  // Collect failed checks for human review (no auto-revision — report only)
   const failedChecks: string[] = [
     ...ctaIssues,
-    ...firstScore.categories.flatMap(cat =>
+    ...seoScore.categories.flatMap(cat =>
       cat.checks.filter(c => !c.passed).map(c => `[${cat.name}] ${c.name}: ${c.detail}`)
     ),
   ]
 
-  // Type-aware threshold
-  const revisionThreshold = REVISION_THRESHOLDS[item.articleType] || 85
-  let currentScore = firstScore
-  let revisionPasses = 0
-  const maxPasses = item.articleType === 'hub' ? 2 : 1
-
-  while (currentScore.total < revisionThreshold && failedChecks.length > 0 && revisionPasses < maxPasses) {
-    revisionPasses++
-    console.log(`  ⚠ Score ${currentScore.total} < ${revisionThreshold} threshold (${item.articleType}) — revision pass ${revisionPasses}/${maxPasses} with ${failedChecks.length} failed checks`)
-    const revisionStart = Date.now()
-    editResult = await editArticle(editResult.html, item.keyword, item.articleType, item.articleStyle, item.airportCode, publishedPosts, failedChecks, analysisContext, airportData)
-    onStep?.('revision', { elapsed: Date.now() - revisionStart, result: editResult as unknown as Record<string, unknown> })
-
-    // Re-score
-    const revisedScore = scoreArticle({ html: editResult.html, ...scorerBase })
-
-    console.log(`  ✓ Revised SEO score: ${revisedScore.total}/${revisedScore.maxTotal} (${revisedScore.grade}) — ${revisedScore.total >= currentScore.total ? '+' : ''}${revisedScore.total - currentScore.total} points`)
-
-    revisionMeta = {
-      triggered: true,
-      scoreBefore: firstScore.total,
-      scoreAfter: revisedScore.total,
-      failedChecks,
+  if (failedChecks.length > 0) {
+    console.log(`\n  ⚠ ${failedChecks.length} failed check(s) — review in report:`)
+    for (const check of failedChecks.slice(0, 10)) {
+      console.log(`    - ${check}`)
     }
-
-    // Update failed checks for next pass
-    currentScore = revisedScore
-    failedChecks.length = 0
-    failedChecks.push(
-      ...ctaIssues,
-      ...currentScore.categories.flatMap(cat =>
-        cat.checks.filter(c => !c.passed).map(c => `[${cat.name}] ${c.name}: ${c.detail}`)
-      ),
-    )
+    if (failedChecks.length > 10) {
+      console.log(`    ... and ${failedChecks.length - 10} more (see full report)`)
+    }
   }
 
-  // Hard floor: articles below threshold after all passes get flagged for human review
-  const suggestedStatus = currentScore.total < HARD_FLOOR_SCORE ? 'review' : 'draft'
-  if (suggestedStatus === 'review') {
-    console.log(`  ⚠ Final score ${currentScore.total} < ${HARD_FLOOR_SCORE} hard floor — flagging for human review`)
-  }
+  // All articles go as draft — human decides next steps based on score + failed checks
+  const suggestedStatus = 'draft' as const
 
   return {
     title: writeResult.title,
@@ -550,7 +536,7 @@ export async function generateArticle(
     suggestedCategory: writeResult.suggestedCategory,
     suggestedTags: analysis.suggestedTags,
     qualityScore: editResult.qualityScore,
-    revision: revisionMeta,
+    failedChecks,
     suggestedStatus,
   }
 }
