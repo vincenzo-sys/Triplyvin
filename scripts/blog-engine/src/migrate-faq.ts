@@ -132,14 +132,14 @@ async function main() {
   let posts: { id: string; title?: string; slug?: string; content?: unknown; faqItems?: unknown[] }[]
 
   if (targetId) {
-    const post = await payloadFetch(`/posts/${targetId}`)
+    const post = await payloadFetch(`/posts/${targetId}?depth=0`)
     posts = [post]
   } else {
     posts = []
     let page = 1
     let hasMore = true
     while (hasMore) {
-      const result = await payloadFetch(`/posts?limit=100&page=${page}`)
+      const result = await payloadFetch(`/posts?limit=100&page=${page}&depth=0`)
       posts.push(...(result.docs || []))
       hasMore = result.hasNextPage === true
       page++
