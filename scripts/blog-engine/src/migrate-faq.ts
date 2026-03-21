@@ -74,7 +74,7 @@ function extractText(node: LexNode): string {
   return ''
 }
 
-const FAQ_PATTERN = /^(?:frequently\s+asked\s+questions|faqs?)$/i
+const FAQ_PATTERN = /^(?:frequently\s+asked\s+questions|faqs?)\b/i
 
 /**
  * Walk the root's children array. If an H2 heading matches the FAQ pattern,
@@ -151,7 +151,10 @@ async function main() {
   let patchedCount = 0
 
   for (const post of posts) {
-    const content = post.content as LexNode | undefined
+    const contentWrapper = post.content as { root?: LexNode } | LexNode | undefined
+    if (!contentWrapper) continue
+    // Payload Lexical stores content as { root: { type: 'root', children: [...] } }
+    const content = ('root' in contentWrapper && contentWrapper.root) ? contentWrapper.root as LexNode : contentWrapper as LexNode
     if (!content || content.type !== 'root') continue
 
     const changed = stripFaqFromLexical(content)
@@ -169,9 +172,11 @@ async function main() {
     }
 
     if (apply) {
+      // Payload expects content as { root: { type: 'root', children: [...] } }
+      const patchContent = ('root' in contentWrapper! && contentWrapper!.root) ? { root: content } : content
       await payloadFetch(`/posts/${post.id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content: patchContent }),
       })
       console.log(`    -> PATCHED (inline FAQ removed, ${post.faqItems!.length} faqItems remain)`)
       patchedCount++

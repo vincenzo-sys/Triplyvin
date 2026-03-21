@@ -38,9 +38,9 @@ const logsDir = path.resolve(__dirname, '..', 'logs')
  * having them in the HTML body too causes duplicate rendering.
  */
 function stripFaqSection(html: string): string {
-  // Match an H2 containing "frequently asked questions" (case-insensitive)
+  // Match an H2 starting with "frequently asked questions" or "FAQ" (case-insensitive)
   // and everything after it until the next H2 or end of string
-  const faqPattern = /<h2[^>]*>\s*(?:frequently\s+asked\s+questions|faqs?\b)[^<]*<\/h2>[\s\S]*?(?=<h2[\s>]|$)/i
+  const faqPattern = /<h2[^>]*>\s*(?:frequently\s+asked\s+questions|faqs?)\b[^<]*<\/h2>[\s\S]*?(?=<h2[\s>]|$)/i
   const stripped = html.replace(faqPattern, '')
   if (stripped.length < html.length) {
     console.log('  ✓ Stripped FAQ section from HTML body (rendered separately via FaqAccordion)')
